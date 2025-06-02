@@ -1,0 +1,125 @@
+import calendar
+import collections
+import datetime
+
+import matthewplotlib as mp
+import tqdm
+
+
+def vis_dates(
+    dates: list[datetime.date],
+    all_dates: None | list[datetime.date] = None,
+) -> mp.plot:
+    """
+    Adapted from mattplotlib calendar heatmap example.
+    """
+    # count dates
+    counts = collections.Counter(dates)
+    for datestamp, count in sorted(counts.items()):
+        print(datestamp, count)
+
+    if len(counts) == 0:
+        return mp.text("(no dates)")
+
+    # normalise counts
+    if all_dates is None:
+        max_count = max(counts.values())
+        norm_data = {date: count/max_count for date, count in counts.items()}
+    else:
+        total_counts = collections.Counter(all_dates)
+        norm_data = {
+            date: counts.get(date, 0) / total_counts[date]
+            for date in total_counts.keys()
+        }
+
+    start_date = min(norm_data.keys())
+    end_date = max(norm_data.keys())
+    year = start_date.year
+    month = start_date.month
+    month_plots = []
+    while datetime.date(year, month, 1) <= end_date:
+        # collect month
+        title = mp.text(f"{calendar.month_name[month]:<9s} {year:4d}")
+        daynames = mp.text("M T W t F S s ")
+        week_plots = []
+        for week in calendar.monthcalendar(year, month):
+            day_plots = []
+            for day in week:
+                if day == 0:
+                    day_plots.append(mp.text("  "))
+                    continue
+                date = datetime.date(year, month, day)
+                if date not in norm_data:
+                    day_plots.append(mp.text("▘ ", color=(0,0,0)))
+                    continue
+                day_plots.append(mp.text(
+                    "▟█",
+                    color=mp.cool(1-norm_data[date]),
+                    bgcolor=(0,0,0),
+                ))
+            week_plots.append(mp.hstack(*day_plots))
+        month_plots.append(
+            mp.vstack(title, daynames, *week_plots)
+            | mp.blank(2,2),
+        )
+        
+        # increment month
+        month += 1
+        if month == 13:
+            year += 1
+            month = 1
+
+    plot = mp.wrap(*month_plots)
+    return plot
+
+
+def load_my_classes(
+    path: str,
+) -> set[str]:
+    my_classes = set()
+    with open(path) as f:
+        for line in f:
+            class_, star, _ = line.split(maxsplit=2)
+            if star == "*":
+                my_classes.add(class_)
+    return my_classes
+
+
+def load_cache(
+    path: str,
+    strip_prefix: bool = False,
+) -> tuple[dict[str, datetime.date], datetime.date]:
+    cache = {}
+    with open(path, 'rt') as f:
+        # 1st line has form "number of papers: NUM_PAPERS"
+        num_papers = int(next(f).strip().split(": ")[-1])
+        # 2nd line has form "latest datestamp: DATESTAMP"
+        latest_date = to_date(next(f).strip().split(": ")[-1])
+        # subsequent lines
+        for line in tqdm.tqdm(f, total=num_papers):
+            xid, datestamp = line.strip().split()
+            if strip_prefix:
+                xid = xid[len("oai:arXiv.org:"):]
+            cache[xid] = to_date(datestamp)
+    return cache, latest_date
+
+
+def load_readlog(
+    path: str,
+) -> dict[str, datetime.date]:
+    readlog = {}
+    with open(path, 'r') as f:
+        for line in f:
+            xid, datestamp = line.strip().split()
+            readlog[xid] = to_date(datestamp)
+    return readlog
+
+
+def to_date(datestamp: str) -> datetime.date:
+    return datetime.datetime.strptime(datestamp, '%Y-%m-%d').date()
+
+
+def to_datestamp(date: datetime.date) -> str:
+    return date.strftime('%Y-%m-%d')
+
+
