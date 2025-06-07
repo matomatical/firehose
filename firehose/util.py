@@ -9,14 +9,16 @@ import tqdm
 def vis_dates(
     dates: list[datetime.date],
     all_dates: None | list[datetime.date] = None,
+    print_counts: bool = True,
 ) -> mp.plot:
     """
-    Adapted from mattplotlib calendar heatmap example.
+    Adapted from matthewplotlib calendar heatmap example.
     """
     # count dates
     counts = collections.Counter(dates)
-    for datestamp, count in sorted(counts.items()):
-        print(datestamp, count)
+    if print_counts:
+        for datestamp, count in sorted(counts.items()):
+            print(datestamp, count)
 
     if len(counts) == 0:
         return mp.text("(no dates)")

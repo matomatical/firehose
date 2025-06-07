@@ -82,16 +82,12 @@ def harvest(
             # update progress bar
             bar.update(len(batch))
             bar.write(f"loaded {len(batch)} papers:")
-            # how many got vs. new?
-            num_got = sum(record.header.identifier in cache for record in batch)
-            num_new = len(batch) - num_got
-            bar.write(f"* got papers: {num_got}")
-            bar.write(f"* new papers: {num_new}")
-            # new latest date
-            latest_date = util.to_date(batch[-1].header.datestamp)
-            bar.write(f"* latest date: {latest_date}")
 
             # save the new article ids to memory
+            new_dates = []
+            num_new_papers = 0
+            num_got_papers = 0
+            num_skipped_papers = 0
             for record in batch:
                 xid = record.header.identifier
                 submit_date = util.to_date(record.metadata['date'][0])
@@ -99,8 +95,21 @@ def harvest(
                 latest_date = util.to_date(record.header.datestamp)
                 classes = set(record.header.setSpecs)
                 if not (classes & my_classes):
+                    num_skipped_papers += 1
                     continue
-                cache[xid] = submit_date
+                if xid not in cache:
+                    num_new_papers += 1
+                    new_dates.append(submit_date)
+                    cache[xid] = submit_date
+                else:
+                    num_got_papers += 1
+            # print the new article statistics
+            bar.write(f"* got papers:     {num_got_papers}")
+            bar.write(f"* new papers:     {num_new_papers}")
+            bar.write(f"* skipped papers: {num_skipped_papers}")
+            bar.write("* new paper dates:")
+            bar.write(str(util.vis_dates(dates=new_dates, print_counts=False)))
+            bar.write(f"* new latest update date: {latest_date}")
             
             if len(batch) < BATCH_SIZE:
                 break
