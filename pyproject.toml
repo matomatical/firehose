@@ -22,8 +22,8 @@ dependencies = [
     "matthewplotlib @ git+https://github.com/matomatical/matthewplotlib",
     "readchar",
     "pathvalidate",
-    # for catchup
     "requests",
+    # for catchup
     "beautifulsoup4",
     # # types
     # "mypy",

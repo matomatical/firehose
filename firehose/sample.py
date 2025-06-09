@@ -142,11 +142,13 @@ def sample(
                 re.sub(r"[^\w ?'\-]", "_", result.title),
             )
             dirpath = os.path.join(os.path.expanduser('~'), "Downloads")
+            path = os.path.join(dirpath, filename)
             # check filename
-            while os.path.exists(os.path.join(dirpath, filename)):
-                filename += " (1)"
-            # download filename
-            result.download_pdf(dirpath=dirpath, filename=filename)
+            while os.path.exists(path):
+                filename = f"{filename[:-4]} (1).pdf"
+            # download
+            util.download_paper(paper_id=xid, path=path)
+            # result.download_pdf(dirpath=dirpath, filename=filename)
         elif key == "o":
             # open the current link and proceed
             os.system(f"open '{result.entry_id}'")

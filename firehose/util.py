@@ -2,6 +2,7 @@ import calendar
 import collections
 import datetime
 
+import requests
 import matthewplotlib as mp
 import tqdm
 
@@ -124,4 +125,24 @@ def to_date(datestamp: str) -> datetime.date:
 def to_datestamp(date: datetime.date) -> str:
     return date.strftime('%Y-%m-%d')
 
+
+def download_paper(paper_id: str, path: str):
+    # get download iterator
+    url = f"https://arxiv.org/pdf/{paper_id}.pdf"
+    response = requests.get(url, stream=True)
+    total = int(response.headers.get('content-length', 0))
+    bar = tqdm.tqdm(
+        desc="Download",
+        total=int(response.headers.get('content-length', None)),
+        unit='iB',
+        unit_scale=True,
+        unit_divisor=1024,
+    )
+    # open file (TODO: CHECK IT DOES NOT EXIST?)
+    with open(path, 'wb') as file:
+        # stream the data into the file
+        for data in response.iter_content(chunk_size=1024):
+            size = file.write(data)
+            bar.update(size)
+    bar.close()
 
