@@ -2,6 +2,7 @@ import datetime
 import gzip
 import os
 import time
+import textwrap
 import re
 
 import arxiv
@@ -78,83 +79,106 @@ def sample(
     k = readchar.readkey()
     done = (k == "q")
 
-    # setup for printing
-    today = datetime.date.today().strftime('%Y-%m-%d')
-    def log(xid):
-        with open('rdlog.txt', 'a') as f:
-            f.write(f'{xid} {today}\n')
-        print(f'logged {xid} {today}')
+    # results navigation loop
+    times = [0.] * len(results)
+    nseen = 0
+    index = 0
+    while not done:
+        # select paper
+        result = results[index]
+        start_time = time.time()
+        assert result.entry_id.startswith("http://arxiv.org/abs/")
+        xidv = result.entry_id[len("http://arxiv.org/abs/"):]
+        xid, _v = xidv.split('v')
+        if index > nseen:
+            nseen = index
+        if index == nseen:
+            with open('rdlog.txt', 'a') as f:
+                f.write(f"{xid} {datetime.date.today().strftime('%Y-%m-%d')}\n")
 
-    start_time = None
-    last_time = None
-    now = None
-    for i, result in enumerate(results, 1):
-        if done:
-            break
-
-        # timing information
-        if now is not None:
-            last_time = now
-        now = time.time()
-        if start_time is None:
-            start_time = now
-
-        # display result
-        print('\033[2J\033[H', end="") # clear screen
-        print(mp.progress(i/len(toread_xids), width=80))
-        print(f"[{i} / {len(toread_xids)}]", end=" ")
-        if last_time is None:
-            print(f"(timing start)")
+        # clear screen
+        print('\033[2J\033[H', end="")
+        
+        # display state and timing statistics
+        print(
+            f"[{index+1} / {len(results)}]",
+            mp.progress((index+1)/len(results), width=60),
+        )
+        if nseen == 0:
+            total_td = 0
+            average = 0
         else:
-            print(f"{now-start_time:.1f} ({now-last_time:+.1f}) [{(now-start_time)/(i-1):.2f}/paper]")
+            total = sum(times[:nseen])
+            total_td = datetime.timedelta(seconds=int(total))
+            average = total / nseen
+        print(f"{total_td} ({average:.2f} seconds/paper)")
+
+        # display paper
         print(
             result.entry_id,
             ', '.join(["\033[3m"+str(c)+"\033[0m" for c in result.categories]),
         )
         print('published:', result.published, 'updated:', result.updated)
-        print("\033[1m"+result.title+"\033[0m")
-        print(', '.join(["\033[2m"+str(a)+"\033[0m" for a in result.authors]))
+        print(
+            "\033[1m",
+            textwrap.fill(result.title, width=80),
+            "\033[0m",
+            sep="",
+        )
+        print(
+            "\033[2m",
+            textwrap.fill(', '.join(map(str, result.authors)), width=80),
+            "\033[0m",
+            sep="",
+        )
         print(result.summary)
         print()
         if result.comment is not None:
             print('comment:', result.comment)
         print()
-
-        # log result
-        assert result.entry_id.startswith("http://arxiv.org/abs/")
-        xidv = result.entry_id[len("http://arxiv.org/abs/"):]
-        xid, _v = xidv.split('v')
-        log(xid)
         
-        # interact with user
-        key = readchar.readkey()
-        if key == "q":
-            done = True
-        elif key == "d":
-            print("downloading...")
-            # construct filename
-            authors = [a.name.split()[-1] for a in result.authors]
-            if len(authors) > 2:
-                authors[1:] = [""]
-            filename="{}{} {}.pdf".format(
-                "+".join(authors),
-                result.published.year,
-                re.sub(r"[^\w ?'\-]", "_", result.title),
-            )
-            dirpath = os.path.join(os.path.expanduser('~'), "Downloads")
-            path = os.path.join(dirpath, filename)
-            # check filename
-            while os.path.exists(path):
-                filename = f"{filename[:-4]} (1).pdf"
-            # download
-            util.download_paper(paper_id=xid, path=path)
-            # result.download_pdf(dirpath=dirpath, filename=filename)
-        elif key == "o":
-            # open the current link and proceed
-            os.system(f"open '{result.entry_id}'")
-        else:
-            # ANYTHING ELSE, JUST PROCEED
-            pass
+        old_index = index
+        while True:
+            key = readchar.readkey()
+            if key == "q" or key == readchar.key.ESC:
+                done = True
+                break
+            if key == readchar.key.LEFT:
+                index = max(0, index - 1)
+                break
+            if key == readchar.key.RIGHT or key == readchar.key.SPACE:
+                index = index + 1
+                if index == len(results):
+                    done = True
+                break
+            elif key == "d" or key == readchar.key.DOWN:
+                print("downloading...")
+                # construct filename
+                authors = [a.name.split()[-1] for a in result.authors]
+                if len(authors) > 2:
+                    authors[1:] = [""]
+                filename="{}{} {}.pdf".format(
+                    "+".join(authors),
+                    result.published.year,
+                    re.sub(r"[^\w ?'\-]", "_", result.title),
+                )
+                dirpath = os.path.join(os.path.expanduser('~'), "Downloads")
+                path = os.path.join(dirpath, filename)
+                # check filename
+                while os.path.exists(path):
+                    filename = f"{filename[:-4]} (1).pdf"
+                # download
+                util.download_paper(paper_id=xid, path=path)
+                print("downloaded.")
+            elif key == "o" or key == readchar.key.UP:
+                # open the current link and proceed
+                print(f"opening '{result.entry_id}'...")
+                os.system(f"open '{result.entry_id}'")
+                print(f"opened.")
+        
+        finish_time = time.time()
+        spent_time = finish_time - start_time
+        times[old_index] += spent_time
 
     print("done!")
 
