@@ -15,7 +15,7 @@ from firehose import util
 
 
 def sample(
-    n: int = 500,
+    n: int = 100,
     query: bool = True,
     backwards: bool = False,
     cache_path: str = "arxiv.txt",
@@ -167,6 +167,7 @@ def sample(
                 # check filename
                 while os.path.exists(path):
                     filename = f"{filename[:-4]} (1).pdf"
+                    path = os.path.join(dirpath, filename)
                 # download
                 util.download_paper(paper_id=xid, path=path)
                 print("downloaded.")
