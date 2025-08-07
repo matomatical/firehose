@@ -90,7 +90,7 @@ def proportion_dates(
 ):
     print("loading all submit dates from paper cache...")
     cache, _ = util.load_cache(path=cache_path, strip_prefix=True)
-    print(f"catalogues {len(cache)} papers")
+    print(f"catalogued {len(cache)} papers")
 
     print("loading read log...")
     readlog = util.load_readlog(path=readlog_path)
@@ -103,6 +103,29 @@ def proportion_dates(
     ))
 
 
+def proportion_papers(
+    readlog_path: str = READLOG_PATH,
+    cache_path: str = CACHE_PATH,
+    batch_size: int = 100,
+):
+    print("loading all submitted ids from paper cache...")
+    cache, _ = util.load_cache(path=cache_path, strip_prefix=True)
+    all_xids = list(cache.keys())
+    print(f"found {len(all_xids)} papers")
+
+    print("loading read log")
+    readlog = util.load_readlog(path=readlog_path)
+    read_xids = list(readlog.keys())
+    print(f"found {len(read_xids)} read papers")
+
+    print("printing visualisation...")
+    print(util.vis_all(
+        all_xids=all_xids,
+        read_xids=read_xids,
+        batch_size=batch_size,
+    ))
+
+
 def cli():
     tyro.extras.subcommand_cli_from_dict({
         'read-date': reading_dates,
@@ -111,4 +134,5 @@ def cli():
         'proportion': proportion_dates,
         'years': all_submitted_years,
         'months': all_submitted_months,
+        'linear': proportion_papers,
     })

@@ -76,6 +76,42 @@ def vis_dates(
     return plot
 
 
+def vis_all(
+    all_xids: list[str],
+    read_xids: list[str],
+    batch_size: int,
+) -> mp.plot:
+    # batch and count proportions
+    read_xids = set(read_xids)
+    proportions = []
+    for i in range(0, len(all_xids), batch_size):
+        batch = set(all_xids[i:i+batch_size])
+        batch_read = batch & read_xids
+        proportions.append(len(batch_read)/len(batch))
+
+    # statistics
+    num_batches = len(proportions)
+    batches_complete = sum(p == 1 for p in proportions)
+    total_progress = len(read_xids) / len(all_xids)
+    
+    # generate plots
+    return (
+        mp.wrap(*[
+            mp.text("▟█", color=mp.cool(1-p), bgcolor=(0,0,0))
+            for p in proportions
+        ])
+        ^ mp.text(
+            f"completed {batches_complete} "
+            f"out of {num_batches} batches "
+            f"of {batch_size} papers"
+        )
+        ^ (
+            mp.text("total progress: ")
+            | mp.text(f"{total_progress:.3%}", color=mp.cool(1-total_progress))
+        )
+    )
+
+
 def load_my_classes(
     path: str,
 ) -> set[str]:
