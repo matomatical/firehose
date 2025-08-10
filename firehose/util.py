@@ -95,7 +95,7 @@ def vis_all(
     total_progress = len(read_xids) / len(all_xids)
     
     # generate plots
-    return (
+    plot = (
         mp.wrap(*[
             mp.text("▟█", color=mp.cool(1-p), bgcolor=(0,0,0))
             for p in proportions
@@ -110,6 +110,7 @@ def vis_all(
             | mp.text(f"{total_progress:.3%}", color=mp.cool(1-total_progress))
         )
     )
+    return plot
 
 
 def load_my_classes(

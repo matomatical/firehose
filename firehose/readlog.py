@@ -14,6 +14,7 @@ CACHE_PATH = "arxiv.txt"
 
 def reading_dates(
     readlog_path: str = READLOG_PATH,
+    save_as: str | None = None,
 ):
     print("loading read log...")
     readlog = util.load_readlog(path=readlog_path)
@@ -21,12 +22,18 @@ def reading_dates(
     print(f"loaded {len(dates)} already-read papers")
 
     print("printing calendar...")
-    print(util.vis_dates(dates))
+    vis = util.vis_dates(dates)
+    print(vis)
+
+    if save_as:
+        print(f"saving calendar to {save_as}...")
+        vis.saveimg(save_as)
 
 
 def submitted_dates(
     readlog_path: str = READLOG_PATH,
     cache_path: str = CACHE_PATH,
+    save_as: str | None = None,
 ):
     print("loading read log...")
     readlog = util.load_readlog(path=readlog_path)
@@ -39,11 +46,17 @@ def submitted_dates(
     print(f"resolved {len(dates)} read papers")
 
     print("printing calendar...")
-    print(util.vis_dates(dates))
+    vis = util.vis_dates(dates)
+    print(vis)
+
+    if save_as:
+        print(f"saving calendar to {save_as}...")
+        vis.saveimg(save_as)
 
 
 def all_submitted_dates(
     cache_path: str = CACHE_PATH,
+    save_as: str | None = None,
 ):
     print("loading all submit dates from paper cache...")
     cache, _ = util.load_cache(path=cache_path)
@@ -51,7 +64,12 @@ def all_submitted_dates(
     dates = list(cache.values())
 
     print("printing calendar...")
-    print(util.vis_dates(dates))
+    vis = util.vis_dates(dates)
+    print(vis)
+
+    if save_as:
+        print(f"saving calendar to {save_as}...")
+        vis.saveimg(save_as)
 
 
 def all_submitted_years(
@@ -87,6 +105,7 @@ def all_submitted_months(
 def proportion_dates(
     readlog_path: str = READLOG_PATH,
     cache_path: str = CACHE_PATH,
+    save_as: str | None = None,
 ):
     print("loading all submit dates from paper cache...")
     cache, _ = util.load_cache(path=cache_path, strip_prefix=True)
@@ -97,16 +116,22 @@ def proportion_dates(
     readlog_submit_dates = [ cache[xid] for xid in readlog if xid in cache ]
 
     print("printing calendar...")
-    print(util.vis_dates(
+    vis = util.vis_dates(
         dates=list(readlog_submit_dates),
         all_dates=list(cache.values()),
-    ))
+    )
+    print(vis)
+
+    if save_as:
+        print(f"saving calendar to {save_as}...")
+        vis.saveimg(save_as)
 
 
 def proportion_papers(
     readlog_path: str = READLOG_PATH,
     cache_path: str = CACHE_PATH,
     batch_size: int = 100,
+    save_as: str | None = None,
 ):
     print("loading all submitted ids from paper cache...")
     cache, _ = util.load_cache(path=cache_path, strip_prefix=True)
@@ -119,11 +144,16 @@ def proportion_papers(
     print(f"found {len(read_xids)} read papers")
 
     print("printing visualisation...")
-    print(util.vis_all(
+    vis = util.vis_all(
         all_xids=all_xids,
         read_xids=read_xids,
         batch_size=batch_size,
-    ))
+    )
+    print(vis)
+
+    if save_as:
+        print(f"saving visualisation to {save_as}...")
+        vis.saveimg(save_as)
 
 
 def cli():
