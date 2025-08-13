@@ -2,7 +2,7 @@ import collections
 
 import tyro
 import tqdm
-import mattplotlib as mp
+import matthewplotlib as mp
 
 from firehose import util
 from firehose import sample
@@ -156,6 +156,38 @@ def proportion_papers(
         vis.saveimg(save_as)
 
 
+def hilbert(
+    readlog_path: str = READLOG_PATH,
+    cache_path: str = CACHE_PATH,
+    batch_size: int = 100,
+    save_as: str | None = None,
+):
+    print("loading all submitted ids from paper cache...")
+    cache, _ = util.load_cache(path=cache_path, strip_prefix=True)
+    all_xids = list(cache.keys())
+    print(f"found {len(all_xids)} papers")
+
+    print("loading read log")
+    readlog = util.load_readlog(path=readlog_path)
+    read_xids = set(readlog.keys())
+    print(f"found {len(read_xids)} read papers")
+
+    print("computing read vector...")
+    read_vec = [xid in read_xids for xid in all_xids]
+
+    print("printing visualisation...")
+    vis = mp.hilbert(
+        data=read_vec,
+        dotcolor=(0,1,1),
+        bgcolor=(0.1,0,0.1),
+    )
+    print(vis)
+
+    if save_as:
+        print(f"saving visualisation to {save_as}...")
+        vis.saveimg(save_as)
+
+
 def cli():
     tyro.extras.subcommand_cli_from_dict({
         'read-date': reading_dates,
@@ -165,4 +197,5 @@ def cli():
         'years': all_submitted_years,
         'months': all_submitted_months,
         'linear': proportion_papers,
+        'hilbert': hilbert,
     })
