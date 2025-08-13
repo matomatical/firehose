@@ -138,8 +138,8 @@ def load_cache(
         # subsequent lines
         for line in tqdm.tqdm(f, total=num_papers):
             xid, datestamp = line.strip().split()
-            if strip_prefix:
-                xid = xid[len("oai:arXiv.org:"):]
+            if not strip_prefix:
+                xid = "oai:arXiv.org:" + xid
             cache[xid] = to_date(datestamp)
     return cache, latest_date
 

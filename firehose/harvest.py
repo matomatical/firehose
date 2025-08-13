@@ -127,7 +127,10 @@ def harvest(
         f.write(f"number of papers: {len(cache)}\n")
         f.write(f"latest datestamp: {util.to_datestamp(latest_date)}\n")
         for date, xid in tqdm.tqdm(sorted_cache):
-            f.write(' '.join([xid, util.to_datestamp(date)]) + "\n")
+            f.write("{} {}\n".format(
+                xid[len("oai:arXiv.org:"):],
+                util.to_datestamp(date),
+            ))
 
     print("done.")
 
