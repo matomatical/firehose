@@ -3,18 +3,28 @@ Firehose
 
 Install with `pip install -e .`.
 
+TODO:
+
+* At the moment, this just indexes and streams arxiv. I would like to
+  generalise it to streaming other lists of abstracts, like conferences,
+  lesswrong/alignment forum, the alignment newsletter, maybe twitter in some
+  form...
+
 Harvest
 -------
 
-`firehose-harvest` creates a file, `arxiv.txt`, which is a list of all article
-IDs on arXiv within a prespecified list of classes, along with their submission
-datestamps. The first few lines of mine (as of today) indicate the format:
+`firehose-harvest` creates a file, `arxiv.txt`, which is a list of all articles
+within a configurable list of classes, along with their submission datestamps.
+The format is something like this:
 
 ```
 number of papers: 749208
 latest datestamp: 2025-08-13
-oai:arXiv.org:cs/9301111 1990-01-01
-oai:arXiv.org:cs/9301113 1991-08-01
+cs/9301111 1990-01-01
+cs/9301113 1991-08-01
+[...skip 749204 lines...]
+2508.09137 2025-08-12
+2508.09138 2025-08-12
 ```
 
 Unlike some other scrapers, this tool uses arXiv's

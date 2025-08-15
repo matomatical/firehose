@@ -1,4 +1,5 @@
 import collections
+import time
 
 import tyro
 import tqdm
@@ -159,7 +160,6 @@ def proportion_papers(
 def hilbert(
     readlog_path: str = READLOG_PATH,
     cache_path: str = CACHE_PATH,
-    batch_size: int = 100,
     save_as: str | None = None,
 ):
     print("loading all submitted ids from paper cache...")
@@ -179,13 +179,53 @@ def hilbert(
     vis = mp.hilbert(
         data=read_vec,
         dotcolor=(0,1,1),
-        bgcolor=(0.1,0,0.1),
+        bgcolor=(0.2,0,0.2),
     )
     print(vis)
 
     if save_as:
         print(f"saving visualisation to {save_as}...")
         vis.saveimg(save_as)
+
+
+def hilbert_live(
+    readlog_path: str = READLOG_PATH,
+    cache_path: str = CACHE_PATH,
+):
+    print("loading all submitted ids from paper cache...")
+    cache, _ = util.load_cache(path=cache_path, strip_prefix=True)
+    all_xids = {xid: i for i, xid in enumerate(cache.keys())}
+    print(f"found {len(all_xids)} papers")
+
+    print("computing read vector...")
+    read_vec = [False] * len(all_xids)
+    rendered = False
+    
+    print("starting read loop...")
+    with open(readlog_path, 'r') as f:
+        while True:
+            # read titles added so far
+            new_titles = False
+            for line in f:
+                new_titles = True
+                xid, _ = line.strip().split()
+                if xid in all_xids:
+                    read_vec[all_xids[xid]] = True
+
+            # if there are new titles, redraw plot
+            if new_titles:
+                vis = mp.hilbert(
+                    data=read_vec,
+                    dotcolor=(0,1,1),
+                    bgcolor=(0.2,0,0.2),
+                )
+                if not rendered: # first time
+                    print(vis)
+                    rendered = True
+                else: # subsequent
+                    print(f"\x1b[{vis.height}A{vis}")
+            else:
+                time.sleep(3) # wait...!
 
 
 def cli():
@@ -198,4 +238,5 @@ def cli():
         'months': all_submitted_months,
         'linear': proportion_papers,
         'hilbert': hilbert,
+        'hilbert-live': hilbert_live,
     })
