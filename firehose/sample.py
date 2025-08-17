@@ -153,6 +153,13 @@ def sample(
                 break
             elif key == "d" or key == readchar.key.DOWN:
                 print("downloading...")
+                # construct path name
+                dirpath = os.path.join(
+                    os.path.expanduser('~'),
+                    "Downloads", # TODO: move this to library
+                    "readings",
+                    datetime.date.today().strftime('%Y.%m'),
+                )
                 # construct filename
                 authors = [a.name.split()[-1] for a in result.authors]
                 if len(authors) > 2:
@@ -162,19 +169,13 @@ def sample(
                     result.published.year,
                     re.sub(r"[^\w ?'\-]", "_", result.title),
                 )
-                # construct path name
-                dirpath = os.path.join(
-                    os.path.expanduser('~'),
-                    "Downloads", # TODO: move this to library
-                    "readings",
-                    datetime.date.today().strftime('%Y.%m'),
-                )
+                # validate path
                 path = os.path.join(dirpath, filename)
-                # check filename
+                os.makedirs(dirpath, exist_ok=True)
                 while os.path.exists(path):
                     filename = f"{filename[:-4]} (1).pdf"
                     path = os.path.join(dirpath, filename)
-                # download
+                # download file to path
                 util.download_paper(paper_id=xid, path=path)
                 print("downloaded.")
                 # TODO: Add to reading list?
