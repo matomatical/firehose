@@ -162,7 +162,13 @@ def sample(
                     result.published.year,
                     re.sub(r"[^\w ?'\-]", "_", result.title),
                 )
-                dirpath = os.path.join(os.path.expanduser('~'), "Downloads")
+                # construct path name
+                dirpath = os.path.join(
+                    os.path.expanduser('~'),
+                    "Downloads", # TODO: move this to library
+                    "readings",
+                    datetime.date.today().strftime('%Y.%m'),
+                )
                 path = os.path.join(dirpath, filename)
                 # check filename
                 while os.path.exists(path):
@@ -171,6 +177,8 @@ def sample(
                 # download
                 util.download_paper(paper_id=xid, path=path)
                 print("downloaded.")
+                # TODO: Add to reading list?
+            # TODO: An option to add to reading list without downloading.
             elif key == "o" or key == readchar.key.UP:
                 # open the current link and proceed
                 print(f"opening '{result.entry_id}'...")
