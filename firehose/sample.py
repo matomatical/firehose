@@ -152,24 +152,38 @@ def sample(
                     done = True
                 break
             elif key == "d" or key == readchar.key.DOWN:
-                print("downloading...")
-                # construct path name
-                dirpath = os.path.join(
-                    os.path.expanduser('~'),
-                    "Downloads", # TODO: move this to library
-                    "readings",
-                    datetime.date.today().strftime('%Y.%m'),
-                )
+                print("constructing paper name...")
                 # construct filename
                 authors = [a.name.split()[-1] for a in result.authors]
                 if len(authors) > 2:
                     authors[1:] = [""]
-                filename="{}{} {}.pdf".format(
-                    "+".join(authors),
+                author_str = "+".join(authors)
+                paper_name = "{}{} {}".format(
+                    author_str,
                     result.published.year,
-                    re.sub(r"[^\w ?'\-]", "_", result.title),
+                    result.title,
                 )
-                # validate path
+                print(paper_name)
+
+                print("adding to reading list...")
+                readinglist = os.path.join(
+                    os.path.expanduser('~'),
+                    "readings",
+                    "downloads.md",
+                )
+                with open(readinglist, 'a') as r:
+                    r.write(f"- {paper_name}\n")
+
+                print("downloading...")
+                # construct path name
+                dirpath = os.path.join(
+                    os.path.expanduser('~'),
+                    "storage",
+                    "library",
+                    "readings",
+                    datetime.date.today().strftime('%Y-%m'),
+                )
+                filename = re.sub(r"[^\w ?+,'\-]", "_", paper_name) + ".pdf"
                 path = os.path.join(dirpath, filename)
                 os.makedirs(dirpath, exist_ok=True)
                 while os.path.exists(path):
