@@ -130,17 +130,18 @@ def load_cache(
     strip_prefix: bool = False,
 ) -> tuple[dict[str, datetime.date], datetime.date]:
     cache = {}
-    with open(path, 'rt') as f:
-        # 1st line has form "number of papers: NUM_PAPERS"
-        num_papers = int(next(f).strip().split(": ")[-1])
-        # 2nd line has form "latest datestamp: DATESTAMP"
+    with open(path, 'r') as f:
+        # 1st line has form "latest datestamp: DATESTAMP"
         latest_date = to_date(next(f).strip().split(": ")[-1])
-        # subsequent lines
-        for line in tqdm.tqdm(f, total=num_papers):
-            xid, datestamp = line.strip().split()
-            if not strip_prefix:
-                xid = "oai:arXiv.org:" + xid
-            cache[xid] = to_date(datestamp)
+        # subsequent lines are papers
+        lines = f.read().splitlines()
+    # process these
+    for line in tqdm.tqdm(lines):
+        xid, datestamp = line.split()
+        cache[xid] = to_date(datestamp)
+    # optionally add prefixes
+    if not strip_prefix:
+        cache = {"oai:arXiv.org:" + x: d for x, d in cache.items()}
     return cache, latest_date
 
 
@@ -156,7 +157,10 @@ def load_readlog(
 
 
 def to_date(datestamp: str) -> datetime.date:
-    return datetime.datetime.strptime(datestamp, '%Y-%m-%d').date()
+    # robust method
+    # return datetime.datetime.strptime(datestamp, '%Y-%m-%d').date()
+    # faster method, taking advantage of fixed format
+    return datetime.date(*map(int, datestamp.split('-')))
 
 
 def to_datestamp(date: datetime.date) -> str:
