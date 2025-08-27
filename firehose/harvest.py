@@ -122,15 +122,12 @@ def harvest(
     bar.close()
         
     print("saving papers to disk...")
-    sorted_cache = sorted([(date, xid) for xid, date in cache.items()])
-    with open(cache_path, 'wt') as f:
-        f.write(f"number of papers: {len(cache)}\n")
-        f.write(f"latest datestamp: {util.to_datestamp(latest_date)}\n")
-        for date, xid in tqdm.tqdm(sorted_cache):
-            f.write("{} {}\n".format(
-                xid[len("oai:arXiv.org:"):],
-                util.to_datestamp(date),
-            ))
+    util.save_cache(
+        path=cache_path,
+        latest_date=latest_date,
+        cache=cache,
+        has_prefix=True,
+    )
 
     print("done.")
 

@@ -145,6 +145,22 @@ def load_cache(
     return cache, latest_date
 
 
+def save_cache(
+    path: str,
+    latest_date: datetime.date,
+    cache: dict[str, datetime.date],
+    has_prefix: bool = False,
+):
+    sorted_cache = sorted([(date, xid) for xid, date in cache.items()])
+    with open(path, 'w') as f:
+        f.write(f"latest datestamp: {to_datestamp(latest_date)}\n")
+        for date, xid in tqdm.tqdm(sorted_cache):
+            f.write("{} {}\n".format(
+                xid[len("oai:arXiv.org:"):],
+                to_datestamp(date),
+            ))
+
+
 def load_readlog(
     path: str,
 ) -> dict[str, datetime.date]:
