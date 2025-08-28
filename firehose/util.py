@@ -1,6 +1,7 @@
 import calendar
 import collections
 import datetime
+import re
 
 import requests
 import matthewplotlib as mp
@@ -183,6 +184,40 @@ def to_datestamp(date: datetime.date) -> str:
     return date.strftime('%Y-%m-%d')
 
 
+def to_name(result) -> str:
+    """
+    `result` is from the arXiv API, it has field:
+
+    * .authors: a list of authors with str .name fields
+    * .published.year: the year of submission
+    * .title: string title
+
+    This method combines these into a string name for the paper in my preferred
+    format.
+    """
+    # author
+    # 1:  LastName
+    # 2:  LastName1+LastName2
+    # >2: LastName1+
+    authors = [a.name.split()[-1] for a in result.authors]
+    if len(authors) > 2:
+        authors[1:] = [""]
+    author_str = "+".join(authors)
+
+    # year is just year
+    year_str = str(result.published.year)
+
+    # title is just title
+    title_str = result.title
+
+    # combine
+    return f"{author_str}{year_str} {title_str}"
+
+
+def to_filename(name: str) -> str:
+    return re.sub(r"[^\w ?+,'()\-]", "_", name) + ".pdf"
+
+
 def download_paper(paper_id: str, path: str):
     # get download iterator
     url = f"https://arxiv.org/pdf/{paper_id}.pdf"
@@ -202,4 +237,5 @@ def download_paper(paper_id: str, path: str):
             size = file.write(data)
             bar.update(size)
     bar.close()
+
 

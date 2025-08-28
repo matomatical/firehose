@@ -3,7 +3,6 @@ import gzip
 import os
 import time
 import textwrap
-import re
 
 import arxiv
 import tqdm
@@ -83,6 +82,7 @@ def sample(
     times = [0.] * len(results)
     nseen = 0
     index = 0
+    first_write = True
     while not done:
         # select paper
         result = results[index]
@@ -143,27 +143,25 @@ def sample(
             if key == "q" or key == readchar.key.ESC:
                 done = True
                 break
-            if key == readchar.key.LEFT:
+            
+            elif key == readchar.key.LEFT:
                 index = max(0, index - 1)
                 break
-            if key == readchar.key.RIGHT or key == readchar.key.SPACE:
+            
+            elif key == readchar.key.RIGHT or key == readchar.key.SPACE:
                 index = index + 1
                 if index == len(results):
                     done = True
                 break
+            
+            elif key == "o" or key == readchar.key.UP:
+                # open the current link and proceed
+                print(f"opening '{result.entry_id}'...")
+                os.system(f"open '{result.entry_id}'")
+                print(f"opened.")
+            
             elif key == "d" or key == readchar.key.DOWN:
-                print("constructing paper name...")
-                # construct filename
-                authors = [a.name.split()[-1] for a in result.authors]
-                if len(authors) > 2:
-                    authors[1:] = [""]
-                author_str = "+".join(authors)
-                paper_name = "{}{} {}".format(
-                    author_str,
-                    result.published.year,
-                    result.title,
-                )
-                print(paper_name)
+                paper_name = util.to_name(result)
 
                 print("adding to reading list...")
                 readinglist = os.path.join(
@@ -172,10 +170,14 @@ def sample(
                     "downloads.md",
                 )
                 with open(readinglist, 'a') as r:
+                    if first_write:
+                        r.write("\nfirehose {}\n\n".format(
+                            datetime.date.today().strftime('%Y.%m.%d'),
+                        ))
+                        first_write = False
                     r.write(f"- {paper_name}\n")
 
                 print("downloading...")
-                # construct path name
                 dirpath = os.path.join(
                     os.path.expanduser('~'),
                     "storage",
@@ -183,22 +185,14 @@ def sample(
                     "readings",
                     datetime.date.today().strftime('%Y-%m'),
                 )
-                filename = re.sub(r"[^\w ?+,'\-]", "_", paper_name) + ".pdf"
+                filename = util.to_filename(paper_name)
                 path = os.path.join(dirpath, filename)
                 os.makedirs(dirpath, exist_ok=True)
                 while os.path.exists(path):
-                    filename = f"{filename[:-4]} (1).pdf"
+                    filename = f"{filename[:-4]} (duplicate).pdf"
                     path = os.path.join(dirpath, filename)
-                # download file to path
                 util.download_paper(paper_id=xid, path=path)
                 print("downloaded.")
-                # TODO: Add to reading list?
-            # TODO: An option to add to reading list without downloading.
-            elif key == "o" or key == readchar.key.UP:
-                # open the current link and proceed
-                print(f"opening '{result.entry_id}'...")
-                os.system(f"open '{result.entry_id}'")
-                print(f"opened.")
         
         finish_time = time.time()
         spent_time = finish_time - start_time
