@@ -1,6 +1,7 @@
 import datetime
 import gzip
 import os
+import random
 import subprocess
 import time
 import textwrap
@@ -18,6 +19,7 @@ def sample(
     n: int = 100,
     query: bool = True,
     backwards: bool = False,
+    randomise: bool = False,
     cache_path: str = "arxiv.txt",
     readlog_path: str = "rdlog.txt",
 ):
@@ -44,6 +46,8 @@ def sample(
     print("sampling new papers up to the budget...")
     if backwards:
         toread = unread[:n]
+    elif randomise:
+        toread = random.sample(unread, n)
     else:
         toread = unread[-n:]
         toread = toread[::-1]
