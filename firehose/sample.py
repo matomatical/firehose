@@ -1,6 +1,7 @@
 import datetime
 import gzip
 import os
+import subprocess
 import time
 import textwrap
 
@@ -163,19 +164,23 @@ def sample(
             elif key == "d" or key == readchar.key.DOWN:
                 paper_name = util.to_name(result)
 
-                print("adding to reading list...")
-                readinglist = os.path.join(
-                    os.path.expanduser('~'),
-                    "readings",
-                    "downloads.md",
-                )
-                with open(readinglist, 'a') as r:
-                    if first_write:
-                        r.write("\nfirehose {}\n\n".format(
-                            datetime.date.today().strftime('%Y.%m.%d'),
-                        ))
-                        first_write = False
-                    r.write(f"- {paper_name}\n")
+                print("copying title to clipboard...")
+                with subprocess.Popen(['pbcopy'], stdin=subprocess.PIPE) as pb:
+                    pb.communicate(input=f"- {paper_name}\n".encode())
+
+                # print("adding to reading list...")
+                # readinglist = os.path.join(
+                #     os.path.expanduser('~'),
+                #     "readings",
+                #     "downloads.md",
+                # )
+                # with open(readinglist, 'a') as r:
+                #     if first_write:
+                #         r.write("\nfirehose {}\n\n".format(
+                #             datetime.date.today().strftime('%Y.%m.%d'),
+                #         ))
+                #         first_write = False
+                #     r.write(f"- {paper_name}\n")
 
                 print("downloading...")
                 dirpath = os.path.join(
