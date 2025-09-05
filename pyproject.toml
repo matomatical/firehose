@@ -31,11 +31,7 @@ dependencies = [
 ]
 
 [project.scripts]
-firehose = "firehose.sample:cli"
-firehose-harvest = "firehose.harvest:cli"
-firehose-catchup = "firehose.catchup:cli"
-firehose-classes = "firehose.classes:cli"
-firehose-readlog = "firehose.readlog:cli"
+firehose = "firehose.cli:cli"
 
 [project.urls]
 Homepage = "https://github.com/matomatical/firehose"

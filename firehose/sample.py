@@ -8,7 +8,6 @@ import textwrap
 
 import arxiv
 import tqdm
-import tyro
 import readchar
 import matthewplotlib as mp
 
@@ -208,7 +207,3 @@ def sample(
         times[old_index] += spent_time
 
     print("done!")
-
-
-def cli():
-    tyro.cli(sample)

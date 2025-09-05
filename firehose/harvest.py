@@ -4,7 +4,6 @@ import time
 
 from sickle import Sickle
 import tqdm
-import tyro
 
 from firehose import util
 
@@ -132,5 +131,3 @@ def harvest(
     print("done.")
 
 
-def cli():
-    tyro.cli(harvest)

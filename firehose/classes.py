@@ -1,7 +1,6 @@
 import sys
 
 from sickle import Sickle
-import tyro
 
 
 API_URL = "https://oaipmh.arxiv.org/oai"
@@ -28,6 +27,3 @@ def classes():
 
     sys.exit(len(new_sets))
 
-
-def cli():
-    tyro.cli(classes)
