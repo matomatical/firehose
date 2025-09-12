@@ -19,6 +19,8 @@ def sample(
     query: bool = True,
     backwards: bool = False,
     randomise: bool = False,
+    query_batch_size: int = 100,
+    query_wait_time: float = 3.5,
     cache_path: str = "arxiv.txt",
     readlog_path: str = "rdlog.txt",
 ):
@@ -66,17 +68,20 @@ def sample(
     toread_xids = [xid for xid, _ in toread]
     results = []
     bar = tqdm.tqdm(
-        range(0, len(toread_xids), 100),
-        unit_scale=100,
+        total=len(toread_xids),
         unit="paper",
     )
-    for cursor in bar:
+    for cursor in range(0, len(toread_xids), query_batch_size):
         search = arxiv.Search(
-            id_list=toread_xids[cursor:cursor+100],
-            max_results=100,
+            id_list=toread_xids[cursor:cursor+query_batch_size],
+            max_results=query_batch_size,
         )
-        results.extend(client.results(search))
-        time.sleep(3.5)
+        new_results = list(client.results(search))
+        results.extend(new_results)
+        bar.update(len(new_results))
+        if cursor+query_batch_size < len(toread_xids):
+            time.sleep(query_wait_time)
+    bar.close()
 
     print("query complete. press q to cancel or anything else to start.")
     k = readchar.readkey()
