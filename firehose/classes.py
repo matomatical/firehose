@@ -7,6 +7,9 @@ API_URL = "https://oaipmh.arxiv.org/oai"
 
 
 def classes():
+    """
+    Download full list of classes, or check for new classes.
+    """
     sickle = Sickle(API_URL)
 
     # existing configured sets

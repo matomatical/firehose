@@ -58,13 +58,13 @@ def vis_dates(
                     continue
                 day_plots.append(mp.text(
                     "▟█",
-                    color=mp.cool(1-norm_data[date]),
+                    color=mp.cyber(norm_data[date]),
                     bgcolor=(0,0,0),
                 ))
             week_plots.append(mp.hstack(*day_plots))
         month_plots.append(
             mp.vstack(title, daynames, *week_plots)
-            | mp.blank(2,2),
+            + mp.blank(2,2),
         )
         
         # increment month
@@ -98,17 +98,17 @@ def vis_all(
     # generate plots
     plot = (
         mp.wrap(*[
-            mp.text("▟█", color=mp.cool(1-p), bgcolor=(0,0,0))
+            mp.text("▟█", color=mp.cyber(p), bgcolor=(0,0,0))
             for p in proportions
         ])
-        ^ mp.text(
+        / mp.text(
             f"completed {batches_complete} "
             f"out of {num_batches} batches "
             f"of {batch_size} papers"
         )
-        ^ (
+        / (
             mp.text("total progress: ")
-            | mp.text(f"{total_progress:.3%}", color=mp.cool(1-total_progress))
+            + mp.text(f"{total_progress:.3%}", color=mp.cyber(total_progress))
         )
     )
     return plot

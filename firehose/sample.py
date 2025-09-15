@@ -24,6 +24,9 @@ def sample(
     cache_path: str = "arxiv.txt",
     readlog_path: str = "rdlog.txt",
 ):
+    """
+    Download and present abstracts for a batch of papers.
+    """
     # load cached headers with overlapping classes
     print("loading papers from disk...")
     cache, _ = util.load_cache(

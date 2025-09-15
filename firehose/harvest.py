@@ -22,6 +22,9 @@ def harvest(
     classes_path: str = CLASSES_PATH,
     cache_path: str = CACHE_PATH,
 ):
+    """
+    Download new arXiv ids in selected classes.
+    """
     # load classes
     my_classes = util.load_my_classes(path=classes_path)
 

@@ -111,8 +111,8 @@ def hilbert(
             if new_titles:
                 vis = mp.hilbert(
                     data=read_vec,
-                    dotcolor=(0,1,1),
-                    bgcolor=(0.2,0,0.2),
+                    dotcolor=(0.0, 1.0, 1.0),
+                    bgcolor=(0.2, 0.0, 0.2),
                 )
                 if not rendered: # first time
                     print(vis)
