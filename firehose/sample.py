@@ -16,6 +16,7 @@ from firehose import util
 
 def sample(
     n: int = 100,
+    /,
     query: bool = True,
     backwards: bool = False,
     randomise: bool = False,
@@ -215,3 +216,28 @@ def sample(
         times[old_index] += spent_time
 
     print("done!")
+
+
+def nsample(
+    n: int = 100,
+    /,
+    backwards: bool = False,
+    randomise: bool = False,
+    query_batch_size: int = 100,
+    query_wait_time: float = 3.5,
+    cache_path: str = "arxiv.txt",
+    readlog_path: str = "rdlog.txt",
+):
+    """
+    Run 'sample' without downloading (sample --no-query).
+    """
+    sample(
+        n,
+        query=False,
+        backwards=backwards,
+        randomise=randomise,
+        query_batch_size=query_batch_size,
+        query_wait_time=query_wait_time,
+        cache_path=cache_path,
+        readlog_path=readlog_path,
+    )

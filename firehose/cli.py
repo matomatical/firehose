@@ -1,5 +1,3 @@
-import functools
-
 import tyro
 
 import firehose.harvest
@@ -17,7 +15,7 @@ def cli():
         'classes': firehose.classes.classes,
         # sample
         'sample': firehose.sample.sample,
-        'nsample': functools.partial(firehose.sample.sample, query=False),
+        'nsample': firehose.sample.nsample,
         # visualising readlog
         'calendar': firehose.vis_readlog.calendar,
         'linear': firehose.vis_readlog.linear,
