@@ -6,6 +6,7 @@ from sickle import Sickle
 import tqdm
 
 from firehose import util
+from firehose import vis
 
 
 API_URL = "https://oaipmh.arxiv.org/oai"
@@ -110,7 +111,7 @@ def harvest(
             bar.write(f"* new papers:     {num_new_papers}")
             bar.write(f"* skipped papers: {num_skipped_papers}")
             bar.write("* new paper dates:")
-            bar.write(str(util.vis_dates(dates=new_dates, print_counts=False)))
+            bar.write(str(vis.vis_dates(dates=new_dates, print_counts=False)))
             bar.write(f"* new latest update date: {latest_date}")
             
             if len(batch) < BATCH_SIZE:

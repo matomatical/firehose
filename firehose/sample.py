@@ -12,6 +12,7 @@ import readchar
 import matthewplotlib as mp
 
 from firehose import util
+from firehose import vis
 
 
 def sample(
@@ -60,7 +61,7 @@ def sample(
 
     print("visualising on calendar...")
     toread_dates = [date for xid, date in toread]
-    print(util.vis_dates(toread_dates))
+    print(vis.vis_dates(toread_dates))
 
     if not query:
         print("exiting...")
