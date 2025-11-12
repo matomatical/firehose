@@ -145,7 +145,7 @@ def sample(
             "\033[0m",
             sep="",
         )
-        print(result.summary)
+        print(textwrap.fill(result.summary, width=80))
         print()
         if result.comment is not None:
             print('comment:', result.comment)
