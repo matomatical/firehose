@@ -69,7 +69,7 @@ def sample(
 
     # run the query
     print("querying the API to get metadata for these papers...")
-    client = arxiv.Client()
+    client = arxiv.Client(num_retries=0)
     toread_xids = [xid for xid, _ in toread]
     results = []
     bar = tqdm.tqdm(
@@ -81,7 +81,11 @@ def sample(
             id_list=toread_xids[cursor:cursor+query_batch_size],
             max_results=query_batch_size,
         )
-        new_results = list(client.results(search))
+        try:
+            new_results = list(client.results(search))
+        except arxiv.HTTPError as e:
+            print(e)
+            raise e
         results.extend(new_results)
         bar.update(len(new_results))
         if cursor+query_batch_size < len(toread_xids):
