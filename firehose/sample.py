@@ -21,6 +21,7 @@ def sample(
     query: bool = True,
     backwards: bool = False,
     randomise: bool = False,
+    offset: int | None = None,
     query_batch_size: int = 100,
     query_wait_time: float = 3.5,
     cache_path: str = "arxiv.txt",
@@ -50,6 +51,8 @@ def sample(
 
     # sampling papers
     print("sampling new papers up to the budget...")
+    if offset is not None:
+        unread = unread[-offset:]
     if backwards:
         toread = unread[:n]
     elif randomise:
@@ -228,6 +231,7 @@ def nsample(
     /,
     backwards: bool = False,
     randomise: bool = False,
+    offset: int | None = None,
     query_batch_size: int = 100,
     query_wait_time: float = 3.5,
     cache_path: str = "arxiv.txt",
@@ -241,6 +245,7 @@ def nsample(
         query=False,
         backwards=backwards,
         randomise=randomise,
+        offset=offset,
         query_batch_size=query_batch_size,
         query_wait_time=query_wait_time,
         cache_path=cache_path,
