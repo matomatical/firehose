@@ -187,11 +187,12 @@ def vis_dates(
     """
     Adapted from matthewplotlib calendar heatmap example.
     """
+    datelines = []
     # count dates
     counts = collections.Counter(dates)
     if print_counts:
         for datestamp, count in sorted(counts.items()):
-            print(datestamp, count)
+            datelines.append(mp.text(f"{datestamp} {count}  "))
 
     if len(counts) == 0:
         return mp.text("(no dates)")
@@ -244,8 +245,15 @@ def vis_dates(
             year += 1
             month = 1
 
-    plot = mp.wrap(*month_plots)
-    return plot
+    if len(datelines) > 50:
+        counts_plot = mp.wrap(
+            *datelines,
+            transpose=True,
+        )
+    else:
+        counts_plot = mp.vstack(*datelines)
+    calendar_plot = mp.wrap(*month_plots)
+    return counts_plot / calendar_plot
 
 
 def vis_all(
