@@ -211,7 +211,7 @@ def sample(
                     "readings",
                     datetime.date.today().strftime('%Y-%m'),
                 )
-                filename = util.to_filename(paper_name)
+                filename = util.to_filename(paper_name, xidv)
                 path = os.path.join(dirpath, filename)
                 os.makedirs(dirpath, exist_ok=True)
                 while os.path.exists(path):

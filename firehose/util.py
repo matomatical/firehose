@@ -106,8 +106,8 @@ def to_name(result) -> str:
     return f"{author_str}{year_str} {title_str}"
 
 
-def to_filename(name: str) -> str:
-    return re.sub(r"[^\w ?+,'()\-]", "_", name) + ".pdf"
+def to_filename(name: str, xidv: str) -> str:
+    return re.sub(r"[^\w ?+,'()\[\]\-]", "_", f"{name} [{xidv}]") + ".pdf"
 
 
 def download_paper(paper_id: str, path: str):
