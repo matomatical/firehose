@@ -71,9 +71,10 @@ def harvest(
         for _ in itertools.count() if num_batches is None else range(num_batches):
             # rate limit
             next_request_time = last_request_time + 1/MAX_RPS + 0.5
-            wait_time = max(0, next_request_time - time.time())
-            bar.write(f"waiting {wait_time} seconds...")
-            time.sleep(wait_time)
+            wait_time = next_request_time - time.time()
+            if wait_time > 0:
+                bar.write(f"waiting {wait_time} seconds...")
+                time.sleep(wait_time)
 
             # load a batch of papers
             bar.write("loading a batch of papers...")
