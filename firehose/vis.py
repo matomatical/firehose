@@ -245,15 +245,18 @@ def vis_dates(
             year += 1
             month = 1
 
-    if len(datelines) > 50:
-        counts_plot = mp.wrap(
-            *datelines,
-            transpose=True,
-        )
-    else:
-        counts_plot = mp.vstack(*datelines)
     calendar_plot = mp.wrap(*month_plots)
-    return counts_plot / calendar_plot
+    if print_counts:
+        if len(datelines) > 50:
+            counts_plot = mp.wrap(
+                *datelines,
+                transpose=True,
+            )
+        else:
+            counts_plot = mp.vstack(*datelines)
+        return counts_plot / calendar_plot
+    else:
+        return calendar_plot
 
 
 def vis_all(
