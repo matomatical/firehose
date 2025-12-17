@@ -135,6 +135,7 @@ def linear(
 
 def hilbert(
     live: bool = False,
+    size: int | None = None,
     readlog_path: str = READLOG_PATH,
     cache_path: str = CACHE_PATH,
 ):
@@ -160,8 +161,9 @@ def hilbert(
 
             # if there are new titles, redraw plot
             if new_titles:
+                show_vec = read_vec if size is None else read_vec[-4**size:]
                 vis = mp.hilbert(
-                    data=read_vec,
+                    data=show_vec,
                     color=(0.0, 1.0, 1.0),
                 )
                 if not rendered: # first time

@@ -95,6 +95,17 @@ def sample(
             time.sleep(query_wait_time)
     bar.close()
 
+    print("reordering results")
+    results_by_xid = {
+        r.entry_id[len("http://arxiv.org/abs/"):].split('v')[0]: r
+        for r in results
+    }
+    results_sorted = [
+        results_by_xid[xid]
+        for xid in toread_xids
+        if xid in results_by_xid
+    ]
+
     print("query complete. press q to cancel or anything else to start.")
     k = readchar.readkey()
     done = (k == "q")
@@ -106,7 +117,7 @@ def sample(
     first_write = True
     while not done:
         # select paper
-        result = results[index]
+        result = results_sorted[index]
         start_time = time.time()
         assert result.entry_id.startswith("http://arxiv.org/abs/")
         xidv = result.entry_id[len("http://arxiv.org/abs/"):]
@@ -122,8 +133,8 @@ def sample(
         
         # display state and timing statistics
         print(
-            f"[{index+1} / {len(results)}]",
-            mp.progress((index+1)/len(results), width=60),
+            f"[{index+1} / {len(results_sorted)}]",
+            mp.progress((index+1)/len(results_sorted), width=60),
         )
         if nseen == 0:
             total_td = 0
@@ -171,7 +182,7 @@ def sample(
             
             elif key == readchar.key.RIGHT or key == readchar.key.SPACE:
                 index = index + 1
-                if index == len(results):
+                if index == len(results_sorted):
                     done = True
                 break
             
