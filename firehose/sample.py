@@ -22,6 +22,7 @@ def sample(
     backwards: bool = False,
     randomise: bool = False,
     offset: int | None = None,
+    modern: bool = False,
     query_batch_size: int = 100,
     query_wait_time: float = 3.5,
     cache_path: str = "arxiv.txt",
@@ -48,6 +49,13 @@ def sample(
     print("removing these from the list...")
     unread = [(xid, date) for xid, date in cache.items() if xid not in read]
     print(f"remaining {len(unread)} papers to scan")
+    
+    # filtering the list for date
+    if modern:
+        print("removing old papers from the list...")
+        cutoff = datetime.date(2025, 4, 15)
+        unread = [(xid, date) for xid, date in unread if date > cutoff]
+        print(f"remaining {len(unread)} papers to scan")
 
     # sampling papers
     print("sampling new papers up to the budget...")
@@ -244,6 +252,7 @@ def nsample(
     backwards: bool = False,
     randomise: bool = False,
     offset: int | None = None,
+    modern: bool = False,
     query_batch_size: int = 100,
     query_wait_time: float = 3.5,
     cache_path: str = "arxiv.txt",
@@ -258,6 +267,7 @@ def nsample(
         backwards=backwards,
         randomise=randomise,
         offset=offset,
+        modern=modern,
         query_batch_size=query_batch_size,
         query_wait_time=query_wait_time,
         cache_path=cache_path,
