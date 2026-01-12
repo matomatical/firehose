@@ -86,6 +86,7 @@ def sample(
     bar = tqdm.tqdm(
         total=len(toread_xids),
         unit="paper",
+        ncols=80,
     )
     for cursor in range(0, len(toread_xids), query_batch_size):
         search = arxiv.Search(
