@@ -29,7 +29,7 @@ def load_cache(
         # subsequent lines are papers
         lines = f.read().splitlines()
     # process these
-    for line in tqdm.tqdm(lines):
+    for line in tqdm.tqdm(lines, ncols=80):
         xid, datestamp = line.split()
         cache[xid] = to_date(datestamp)
     # optionally add prefixes
@@ -47,7 +47,7 @@ def save_cache(
     sorted_cache = sorted([(date, xid) for xid, date in cache.items()])
     with open(path, 'w') as f:
         f.write(f"latest datestamp: {to_datestamp(latest_date)}\n")
-        for date, xid in tqdm.tqdm(sorted_cache):
+        for date, xid in tqdm.tqdm(sorted_cache, ncols=80):
             f.write("{} {}\n".format(
                 xid[len("oai:arXiv.org:"):],
                 to_datestamp(date),
@@ -121,6 +121,7 @@ def download_paper(paper_id: str, path: str):
         unit='iB',
         unit_scale=True,
         unit_divisor=1024,
+        ncols=80,
     )
     # open file (TODO: CHECK IT DOES NOT EXIST?)
     with open(path, 'wb') as file:

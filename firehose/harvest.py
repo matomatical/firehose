@@ -63,7 +63,7 @@ def harvest(
         total = expected_total - len(cache)
     bar = tqdm.tqdm(
         total=total,
-        dynamic_ncols=True,
+        ncols=80,
         unit=" papers",
         unit_scale=1,
     )
