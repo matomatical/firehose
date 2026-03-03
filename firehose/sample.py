@@ -22,7 +22,7 @@ def sample(
     backwards: bool = False,
     randomise: bool = False,
     offset: int | None = None,
-    modern: bool = False,
+    modern: bool = True,
     query_batch_size: int = 100,
     query_wait_time: float = 3.5,
     cache_path: str = "arxiv.txt",
