@@ -2,7 +2,6 @@ import datetime
 import gzip
 import os
 import random
-import subprocess
 import time
 import textwrap
 
@@ -27,6 +26,8 @@ def sample(
     query_wait_time: float = 3.5,
     cache_path: str = "arxiv.txt",
     readlog_path: str = "rdlog.txt",
+    readinglist_dir: str = "~/readings/archive",
+    download_dir: str = "~/storage/library/readings",
 ):
     """
     Download and present abstracts for a batch of papers.
@@ -134,7 +135,7 @@ def sample(
         if index > nseen:
             nseen = index
         if index == nseen:
-            with open('rdlog.txt', 'a') as f:
+            with open(readlog_path, 'a') as f:
                 f.write(f"{xid} {datetime.date.today().strftime('%Y-%m-%d')}\n")
 
         # clear screen
@@ -198,23 +199,26 @@ def sample(
             elif key == "o" or key == readchar.key.UP:
                 # open the current link and proceed
                 print(f"opening '{result.entry_id}'...")
-                os.system(f"open '{result.entry_id}'")
-                print(f"opened.")
-            
+                if util.open_url(result.entry_id):
+                    print("opened.")
+                else:
+                    print(f"no opener available; url: {result.entry_id}")
+
             elif key == "d" or key == readchar.key.DOWN:
                 paper_name = util.to_name(result)
 
                 print("copying title to clipboard...")
-                with subprocess.Popen(['pbcopy'], stdin=subprocess.PIPE) as pb:
-                    pb.communicate(input=f"- {paper_name}\n".encode())
+                if util.copy_to_clipboard(f"- {paper_name}\n"):
+                    print("copied.")
+                else:
+                    print("no clipboard available; skipped copy.")
 
                 print("adding to downloads list...")
                 readinglist = os.path.join(
-                    os.path.expanduser('~'),
-                    "readings",
-                    "archive",
+                    os.path.expanduser(readinglist_dir),
                     "{}-firehose.md".format(datetime.date.today().strftime('%Y')),
                 )
+                os.makedirs(os.path.dirname(readinglist), exist_ok=True)
                 with open(readinglist, 'a') as r:
                     if first_write:
                         r.write("\nfirehose {}\n\n".format(
@@ -225,10 +229,7 @@ def sample(
 
                 print("downloading...")
                 dirpath = os.path.join(
-                    os.path.expanduser('~'),
-                    "storage",
-                    "library",
-                    "readings",
+                    os.path.expanduser(download_dir),
                     datetime.date.today().strftime('%Y-%m'),
                 )
                 filename = util.to_filename(paper_name, xidv)

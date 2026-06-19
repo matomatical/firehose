@@ -1,6 +1,10 @@
 import collections
 import datetime
+import os
 import re
+import shutil
+import subprocess
+import sys
 
 import requests
 import tqdm
@@ -130,5 +134,63 @@ def download_paper(paper_id: str, path: str):
             size = file.write(data)
             bar.update(size)
     bar.close()
+
+
+def copy_to_clipboard(text: str) -> bool:
+    """
+    Copy `text` to the system clipboard using the platform-appropriate tool.
+
+    Returns True if the text was handed off to a clipboard tool, or False if no
+    usable clipboard is available (e.g. a headless Linux session). Never raises
+    when a clipboard tool is missing.
+    """
+    if sys.platform == "darwin":
+        argv = ["pbcopy"]
+    elif sys.platform.startswith("linux"):
+        # only attempt if there is a display to own the X/Wayland selection
+        if not (os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY")):
+            return False
+        if shutil.which("wl-copy"):
+            argv = ["wl-copy"]
+        elif shutil.which("xclip"):
+            argv = ["xclip", "-selection", "clipboard"]
+        elif shutil.which("xsel"):
+            argv = ["xsel", "--clipboard", "--input"]
+        else:
+            return False
+    else:
+        return False
+    try:
+        with subprocess.Popen(argv, stdin=subprocess.PIPE) as proc:
+            proc.communicate(input=text.encode())
+        return True
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def open_url(url: str) -> bool:
+    """
+    Open `url` with the platform's default handler (browser / opener).
+
+    Returns True if an opener was launched, or False otherwise (in which case
+    the caller may want to print the URL instead). Never raises.
+    """
+    if sys.platform == "darwin":
+        opener = "open"
+    elif sys.platform.startswith("linux"):
+        opener = "xdg-open" if shutil.which("xdg-open") else None
+    else:
+        opener = None
+    if opener is None:
+        return False
+    try:
+        subprocess.Popen(
+            [opener, url],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return True
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
