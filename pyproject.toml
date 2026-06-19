@@ -30,6 +30,11 @@ dependencies = [
     # "types-tqdm",
 ]
 
+[project.optional-dependencies]
+test = [
+    "pytest",
+]
+
 [project.scripts]
 firehose = "firehose.cli:cli"
 

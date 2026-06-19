@@ -1,17 +1,15 @@
 import datetime
-import gzip
 import os
 import random
 import time
-import textwrap
 
 import arxiv
 import tqdm
 import readchar
-import matthewplotlib as mp
 
 from firehose import util
 from firehose import vis
+from firehose import scanner as scn
 
 
 def sample(
@@ -116,216 +114,156 @@ def sample(
         if xid in results_by_xid
     ]
 
-    total = len(results_sorted)
-    if total == 0:
+    if len(results_sorted) == 0:
         print("no papers to show.")
         return
+    papers = [_paper_from_result(r) for r in results_sorted]
 
     print("query complete. press q to cancel or anything else to start.")
-    k = readchar.readkey()
-    done = (k == "q")
-    if not done:
-        util.log_event(scanlog_path, {"type": "start", "n": total})
+    if readchar.readkey() == "q":
+        return
+    _run_session(
+        papers,
+        scanlog_path=scanlog_path,
+        readlog_path=readlog_path,
+        download_dir=download_dir,
+    )
+    print("done!")
 
-    # ---- navigation loop ----
-    # Each paper has a state: none -> saved (☆) -> downloaded (★). The keys move
-    # along this state machine and every action is logged to the scan log as a
-    # timestamped event. Dwell time is NOT stored; it is derived offline from the
-    # event timestamps (the running average below is an in-memory convenience).
-    times = [0.0] * total          # active (pause-excluded) seconds per paper
-    states = ["none"] * total      # per-paper state: none / saved / downloaded
-    pdf_paths = [None] * total     # PDF path recorded on download, for remove
-    glyphs = {"none": " ", "saved": "☆", "downloaded": "★"}
 
-    nseen = -1                     # highest index reached (so index 0 counts)
-    index = 0
-    arrived = True                 # just landed on `index`: emit view + reset timer
-    paused = False
-    pause_start = 0.0
-    view_start = 0.0
-    view_paused = 0.0
-    message = ""
+def _paper_from_result(r) -> scn.Paper:
+    """Build a lightweight Paper (decoupled from the arxiv result) for scanning."""
+    xidv = r.entry_id[len("http://arxiv.org/abs/"):]
+    return scn.Paper(
+        xid=xidv.split('v')[0],
+        xidv=xidv,
+        name=util.to_name(r),
+        entry_id=r.entry_id,
+        title=r.title,
+        authors=[str(a) for a in r.authors],
+        categories=[str(c) for c in r.categories],
+        summary=r.summary,
+        published=r.published,
+        updated=r.updated,
+        comment=r.comment,
+    )
 
-    def commit_time():
-        # add this visit's active (un-paused) time to the current paper's tally
-        times[index] += (time.time() - view_start) - view_paused
 
-    def do_save():
-        states[index] = "saved"
-        util.log_event(scanlog_path, {"type": "save", "xid": xid})
-        ok = util.copy_to_clipboard(f"- ? {util.to_name(result)}\n")
-        return "saved ☆  (copied '- ? ...')" if ok else "saved ☆  (no clipboard)"
+def _key_to_command(key) -> str | None:
+    """Map a raw keypress to a semantic Scanner command (None = ignore)."""
+    if key == "q" or key == readchar.key.ESC:
+        return "quit"
+    if key == readchar.key.LEFT:
+        return "back"
+    if key == readchar.key.RIGHT:
+        return "forward"
+    if key == readchar.key.SPACE:
+        return "pause"
+    if key == "o" or key == readchar.key.UP:
+        return "open"
+    if key == "s":
+        return "save"
+    if key == "d":
+        return "download"
+    if key == readchar.key.DOWN:
+        return "down"
+    if key == "x":
+        return "remove"
+    return None
 
-    def do_download():
-        paper_name = util.to_name(result)
-        ok = util.copy_to_clipboard(f"- {paper_name}\n")
+
+class Stopwatch:
+    """Wall-clock stopwatch that can be paused; drives the live dwell average."""
+
+    def __init__(self):
+        self._accum = 0.0
+        self._segment_start = time.time()
+        self._paused = False
+
+    def elapsed(self) -> float:
+        if self._paused:
+            return self._accum
+        return self._accum + (time.time() - self._segment_start)
+
+    def set_paused(self, paused: bool):
+        if paused and not self._paused:
+            self._accum += time.time() - self._segment_start
+            self._paused = True
+        elif not paused and self._paused:
+            self._segment_start = time.time()
+            self._paused = False
+
+
+def _timing_line(stopwatch: Stopwatch, nseen: int, paused: bool) -> str:
+    total = stopwatch.elapsed()
+    seen = nseen + 1
+    average = total / seen if seen > 0 else 0.0
+    line = f"{datetime.timedelta(seconds=int(total))} ({average:.2f} seconds/paper)"
+    if paused:
+        line += "   — PAUSED (space to resume)"
+    return line
+
+
+def _execute(effect, *, scanlog_path, readlog_path, download_dir, pdf_paths):
+    """Carry out one declarative effect emitted by the Scanner."""
+    if isinstance(effect, scn.Log):
+        util.log_event(scanlog_path, effect.event)
+
+    elif isinstance(effect, scn.Clip):
+        util.copy_to_clipboard(effect.text)
+
+    elif isinstance(effect, scn.Open):
+        if not util.open_url(effect.url):
+            print(f"no opener available; url: {effect.url}")
+
+    elif isinstance(effect, scn.Readlog):
+        with open(readlog_path, 'a') as f:
+            f.write(f"{effect.xid} {datetime.date.today().strftime('%Y-%m-%d')}\n")
+
+    elif isinstance(effect, scn.Download):
         dirpath = os.path.join(
             os.path.expanduser(download_dir),
             datetime.date.today().strftime('%Y-%m'),
         )
-        filename = util.to_filename(paper_name, xidv)
+        filename = util.to_filename(effect.name, effect.xidv)
         path = os.path.join(dirpath, filename)
         os.makedirs(dirpath, exist_ok=True)
         while os.path.exists(path):
             filename = f"{filename[:-4]} (duplicate).pdf"
             path = os.path.join(dirpath, filename)
-        util.download_paper(paper_id=xid, path=path)
-        states[index] = "downloaded"
-        pdf_paths[index] = path
-        util.log_event(scanlog_path, {"type": "download", "xid": xid})
-        return "downloaded ★  (copied '- ...')" if ok else "downloaded ★  (no clipboard)"
+        util.download_paper(paper_id=effect.xid, path=path)
+        pdf_paths[effect.xid] = path
 
-    while not done:
-        # select paper
-        result = results_sorted[index]
-        xidv = result.entry_id[len("http://arxiv.org/abs/"):]
-        xid = xidv.split('v')[0]
+    elif isinstance(effect, scn.DeletePDF):
+        path = pdf_paths.pop(effect.xid, None)
+        if path and os.path.exists(path):
+            os.remove(path)
 
-        # on fresh arrival: record the read, emit a view event, start the timer
-        if arrived:
-            if index > nseen:
-                nseen = index
-                with open(readlog_path, 'a') as f:
-                    f.write(f"{xid} {datetime.date.today().strftime('%Y-%m-%d')}\n")
-            util.log_event(scanlog_path, {"type": "view", "xid": xid})
-            view_start = time.time()
-            view_paused = 0.0
-            arrived = False
 
-        # ---- render ----
-        print('\033[2J\033[H', end="")
+def _run_session(papers, *, scanlog_path, readlog_path, download_dir):
+    """Drive the interactive scan: render, read a key, run the Scanner's effects."""
+    sc = scn.Scanner(papers)
+    pdf_paths = {}
 
-        # state line: position, progress, status glyph (glyph last to dodge any
-        # ambiguous-width rendering of the star)
-        print(
-            f"[{index+1} / {total}]",
-            mp.progress((index+1)/total, width=60),
-            glyphs[states[index]],
-        )
+    def run(effects):
+        for effect in effects:
+            _execute(
+                effect,
+                scanlog_path=scanlog_path,
+                readlog_path=readlog_path,
+                download_dir=download_dir,
+                pdf_paths=pdf_paths,
+            )
 
-        # timing line (in-memory running average; excludes paused time)
-        paused_now = view_paused + (time.time() - pause_start if paused else 0.0)
-        total_active = sum(times) + (time.time() - view_start) - paused_now
-        average = total_active / (nseen + 1)
-        status = f"{datetime.timedelta(seconds=int(total_active))} ({average:.2f} seconds/paper)"
-        if paused:
-            status += "   — PAUSED (space to resume)"
-        print(status)
-
-        # display paper
-        print(
-            result.entry_id,
-            ', '.join(["\033[3m"+str(c)+"\033[0m" for c in result.categories]),
-        )
-        print('published:', result.published, 'updated:', result.updated)
-        print(
-            "\033[1m",
-            textwrap.fill(result.title, width=80),
-            "\033[0m",
-            sep="",
-        )
-        print(
-            "\033[2m",
-            textwrap.fill(', '.join(map(str, result.authors)), width=80),
-            "\033[0m",
-            sep="",
-        )
-        print(textwrap.fill(result.summary, width=80))
-        print()
-        if result.comment is not None:
-            print('comment:', result.comment)
-        print()
-        if message:
-            print(message)
-
-        # ---- input ----
-        key = readchar.readkey()
-
-        # while paused, only space (resume) and q (quit) respond
-        if paused:
-            if key == readchar.key.SPACE:
-                view_paused += time.time() - pause_start
-                paused = False
-                util.log_event(scanlog_path, {"type": "resume"})
-                message = ""
-            elif key == "q" or key == readchar.key.ESC:
-                view_paused += time.time() - pause_start
-                paused = False
-                commit_time()
-                util.log_event(scanlog_path, {"type": "end"})
-                done = True
-            else:
-                message = "paused — press space to resume"
+    run(sc.start())
+    stopwatch = Stopwatch()
+    while not sc.done:
+        print(scn.render_frame(sc, _timing_line(stopwatch, sc.nseen, sc.paused)))
+        command = _key_to_command(readchar.readkey())
+        if command is None:
             continue
-
-        if key == readchar.key.SPACE:
-            paused = True
-            pause_start = time.time()
-            util.log_event(scanlog_path, {"type": "pause"})
-            message = ""
-
-        elif key == "q" or key == readchar.key.ESC:
-            commit_time()
-            util.log_event(scanlog_path, {"type": "end"})
-            done = True
-
-        elif key == readchar.key.LEFT:
-            if index > 0:
-                commit_time()
-                index -= 1
-                arrived = True
-            message = ""
-
-        elif key == readchar.key.RIGHT:
-            commit_time()
-            if index + 1 == total:
-                util.log_event(scanlog_path, {"type": "end"})
-                done = True
-            else:
-                index += 1
-                arrived = True
-            message = ""
-
-        elif key == "o" or key == readchar.key.UP:
-            if util.open_url(result.entry_id):
-                message = "opened."
-            else:
-                message = f"no opener available; url: {result.entry_id}"
-
-        elif key == "s":
-            if states[index] == "none":
-                message = do_save()
-            else:
-                message = f"already {states[index]}."
-
-        elif key == readchar.key.DOWN:
-            # progressive: none -> saved, saved -> downloaded
-            if states[index] == "none":
-                message = do_save()
-            elif states[index] == "saved":
-                message = do_download()
-            else:
-                message = "already downloaded ★."
-
-        elif key == "d":
-            if states[index] != "downloaded":
-                message = do_download()
-            else:
-                message = "already downloaded ★."
-
-        elif key == "x":
-            if states[index] != "none":
-                p = pdf_paths[index]
-                if p and os.path.exists(p):
-                    os.remove(p)
-                pdf_paths[index] = None
-                states[index] = "none"
-                util.log_event(scanlog_path, {"type": "remove", "xid": xid})
-                message = "removed."
-            else:
-                message = "nothing to remove."
-
-    print("done!")
+        run(sc.feed(command))
+        stopwatch.set_paused(sc.paused)
 
 
 def nsample(
