@@ -1,5 +1,6 @@
 import collections
 import datetime
+import json
 import os
 import re
 import shutil
@@ -192,5 +193,19 @@ def open_url(url: str) -> bool:
         return True
     except (OSError, subprocess.SubprocessError):
         return False
+
+
+def log_event(path: str, event: dict) -> None:
+    """
+    Append one event as a JSON line to the scan log at `path`, stamped with the
+    current local time under the key "t". Each call is a self-contained append,
+    so the log is written in real time and survives a crash mid-session.
+    """
+    record = {"t": datetime.datetime.now().isoformat(), **event}
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    with open(path, "a") as f:
+        f.write(json.dumps(record) + "\n")
 
 

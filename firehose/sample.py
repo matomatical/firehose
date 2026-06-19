@@ -26,7 +26,7 @@ def sample(
     query_wait_time: float = 3.5,
     cache_path: str = "arxiv.txt",
     readlog_path: str = "rdlog.txt",
-    readinglist_dir: str = "~/readings/archive",
+    scanlog_path: str = "scanlog.jsonl",
     download_dir: str = "~/storage/library/readings",
 ):
     """
@@ -39,7 +39,7 @@ def sample(
         strip_prefix=True,
     )
     print(f"loaded {len(cache)} papers")
-    
+
     # load read papers from read log
     print("checking which have already been read...")
     readlog = util.load_readlog(path=readlog_path)
@@ -50,7 +50,7 @@ def sample(
     print("removing these from the list...")
     unread = [(xid, date) for xid, date in cache.items() if xid not in read]
     print(f"remaining {len(unread)} papers to scan")
-    
+
     # filtering the list for date
     if modern:
         print("removing old papers from the list...")
@@ -116,44 +116,101 @@ def sample(
         if xid in results_by_xid
     ]
 
+    total = len(results_sorted)
+    if total == 0:
+        print("no papers to show.")
+        return
+
     print("query complete. press q to cancel or anything else to start.")
     k = readchar.readkey()
     done = (k == "q")
+    if not done:
+        util.log_event(scanlog_path, {"type": "start", "n": total})
 
-    # results navigation loop
-    times = [0.] * len(results)
-    nseen = 0
+    # ---- navigation loop ----
+    # Each paper has a state: none -> saved (☆) -> downloaded (★). The keys move
+    # along this state machine and every action is logged to the scan log as a
+    # timestamped event. Dwell time is NOT stored; it is derived offline from the
+    # event timestamps (the running average below is an in-memory convenience).
+    times = [0.0] * total          # active (pause-excluded) seconds per paper
+    states = ["none"] * total      # per-paper state: none / saved / downloaded
+    pdf_paths = [None] * total     # PDF path recorded on download, for remove
+    glyphs = {"none": " ", "saved": "☆", "downloaded": "★"}
+
+    nseen = -1                     # highest index reached (so index 0 counts)
     index = 0
-    first_write = True
+    arrived = True                 # just landed on `index`: emit view + reset timer
+    paused = False
+    pause_start = 0.0
+    view_start = 0.0
+    view_paused = 0.0
+    message = ""
+
+    def commit_time():
+        # add this visit's active (un-paused) time to the current paper's tally
+        times[index] += (time.time() - view_start) - view_paused
+
+    def do_save():
+        states[index] = "saved"
+        util.log_event(scanlog_path, {"type": "save", "xid": xid})
+        ok = util.copy_to_clipboard(f"- ? {util.to_name(result)}\n")
+        return "saved ☆  (copied '- ? ...')" if ok else "saved ☆  (no clipboard)"
+
+    def do_download():
+        paper_name = util.to_name(result)
+        ok = util.copy_to_clipboard(f"- {paper_name}\n")
+        dirpath = os.path.join(
+            os.path.expanduser(download_dir),
+            datetime.date.today().strftime('%Y-%m'),
+        )
+        filename = util.to_filename(paper_name, xidv)
+        path = os.path.join(dirpath, filename)
+        os.makedirs(dirpath, exist_ok=True)
+        while os.path.exists(path):
+            filename = f"{filename[:-4]} (duplicate).pdf"
+            path = os.path.join(dirpath, filename)
+        util.download_paper(paper_id=xid, path=path)
+        states[index] = "downloaded"
+        pdf_paths[index] = path
+        util.log_event(scanlog_path, {"type": "download", "xid": xid})
+        return "downloaded ★  (copied '- ...')" if ok else "downloaded ★  (no clipboard)"
+
     while not done:
         # select paper
         result = results_sorted[index]
-        start_time = time.time()
-        assert result.entry_id.startswith("http://arxiv.org/abs/")
         xidv = result.entry_id[len("http://arxiv.org/abs/"):]
-        xid, _v = xidv.split('v')
-        if index > nseen:
-            nseen = index
-        if index == nseen:
-            with open(readlog_path, 'a') as f:
-                f.write(f"{xid} {datetime.date.today().strftime('%Y-%m-%d')}\n")
+        xid = xidv.split('v')[0]
 
-        # clear screen
+        # on fresh arrival: record the read, emit a view event, start the timer
+        if arrived:
+            if index > nseen:
+                nseen = index
+                with open(readlog_path, 'a') as f:
+                    f.write(f"{xid} {datetime.date.today().strftime('%Y-%m-%d')}\n")
+            util.log_event(scanlog_path, {"type": "view", "xid": xid})
+            view_start = time.time()
+            view_paused = 0.0
+            arrived = False
+
+        # ---- render ----
         print('\033[2J\033[H', end="")
-        
-        # display state and timing statistics
+
+        # state line: position, progress, status glyph (glyph last to dodge any
+        # ambiguous-width rendering of the star)
         print(
-            f"[{index+1} / {len(results_sorted)}]",
-            mp.progress((index+1)/len(results_sorted), width=60),
+            f"[{index+1} / {total}]",
+            mp.progress((index+1)/total, width=60),
+            glyphs[states[index]],
         )
-        if nseen == 0:
-            total_td = 0
-            average = 0
-        else:
-            total = sum(times[:nseen])
-            total_td = datetime.timedelta(seconds=int(total))
-            average = total / nseen
-        print(f"{total_td} ({average:.2f} seconds/paper)")
+
+        # timing line (in-memory running average; excludes paused time)
+        paused_now = view_paused + (time.time() - pause_start if paused else 0.0)
+        total_active = sum(times) + (time.time() - view_start) - paused_now
+        average = total_active / (nseen + 1)
+        status = f"{datetime.timedelta(seconds=int(total_active))} ({average:.2f} seconds/paper)"
+        if paused:
+            status += "   — PAUSED (space to resume)"
+        print(status)
 
         # display paper
         print(
@@ -178,72 +235,95 @@ def sample(
         if result.comment is not None:
             print('comment:', result.comment)
         print()
-        
-        old_index = index
-        while True:
-            key = readchar.readkey()
-            if key == "q" or key == readchar.key.ESC:
+        if message:
+            print(message)
+
+        # ---- input ----
+        key = readchar.readkey()
+
+        # while paused, only space (resume) and q (quit) respond
+        if paused:
+            if key == readchar.key.SPACE:
+                view_paused += time.time() - pause_start
+                paused = False
+                util.log_event(scanlog_path, {"type": "resume"})
+                message = ""
+            elif key == "q" or key == readchar.key.ESC:
+                view_paused += time.time() - pause_start
+                paused = False
+                commit_time()
+                util.log_event(scanlog_path, {"type": "end"})
                 done = True
-                break
-            
-            elif key == readchar.key.LEFT:
-                index = max(0, index - 1)
-                break
-            
-            elif key == readchar.key.RIGHT or key == readchar.key.SPACE:
-                index = index + 1
-                if index == len(results_sorted):
-                    done = True
-                break
-            
-            elif key == "o" or key == readchar.key.UP:
-                # open the current link and proceed
-                print(f"opening '{result.entry_id}'...")
-                if util.open_url(result.entry_id):
-                    print("opened.")
-                else:
-                    print(f"no opener available; url: {result.entry_id}")
+            else:
+                message = "paused — press space to resume"
+            continue
 
-            elif key == "d" or key == readchar.key.DOWN:
-                paper_name = util.to_name(result)
+        if key == readchar.key.SPACE:
+            paused = True
+            pause_start = time.time()
+            util.log_event(scanlog_path, {"type": "pause"})
+            message = ""
 
-                print("copying title to clipboard...")
-                if util.copy_to_clipboard(f"- {paper_name}\n"):
-                    print("copied.")
-                else:
-                    print("no clipboard available; skipped copy.")
+        elif key == "q" or key == readchar.key.ESC:
+            commit_time()
+            util.log_event(scanlog_path, {"type": "end"})
+            done = True
 
-                print("adding to downloads list...")
-                readinglist = os.path.join(
-                    os.path.expanduser(readinglist_dir),
-                    "{}-firehose.md".format(datetime.date.today().strftime('%Y')),
-                )
-                os.makedirs(os.path.dirname(readinglist), exist_ok=True)
-                with open(readinglist, 'a') as r:
-                    if first_write:
-                        r.write("\nfirehose {}\n\n".format(
-                            datetime.date.today().strftime('%Y.%m.%d'),
-                        ))
-                        first_write = False
-                    r.write(f"- {paper_name}\n")
+        elif key == readchar.key.LEFT:
+            if index > 0:
+                commit_time()
+                index -= 1
+                arrived = True
+            message = ""
 
-                print("downloading...")
-                dirpath = os.path.join(
-                    os.path.expanduser(download_dir),
-                    datetime.date.today().strftime('%Y-%m'),
-                )
-                filename = util.to_filename(paper_name, xidv)
-                path = os.path.join(dirpath, filename)
-                os.makedirs(dirpath, exist_ok=True)
-                while os.path.exists(path):
-                    filename = f"{filename[:-4]} (duplicate).pdf"
-                    path = os.path.join(dirpath, filename)
-                util.download_paper(paper_id=xid, path=path)
-                print("downloaded.")
-        
-        finish_time = time.time()
-        spent_time = finish_time - start_time
-        times[old_index] += spent_time
+        elif key == readchar.key.RIGHT:
+            commit_time()
+            if index + 1 == total:
+                util.log_event(scanlog_path, {"type": "end"})
+                done = True
+            else:
+                index += 1
+                arrived = True
+            message = ""
+
+        elif key == "o" or key == readchar.key.UP:
+            if util.open_url(result.entry_id):
+                message = "opened."
+            else:
+                message = f"no opener available; url: {result.entry_id}"
+
+        elif key == "s":
+            if states[index] == "none":
+                message = do_save()
+            else:
+                message = f"already {states[index]}."
+
+        elif key == readchar.key.DOWN:
+            # progressive: none -> saved, saved -> downloaded
+            if states[index] == "none":
+                message = do_save()
+            elif states[index] == "saved":
+                message = do_download()
+            else:
+                message = "already downloaded ★."
+
+        elif key == "d":
+            if states[index] != "downloaded":
+                message = do_download()
+            else:
+                message = "already downloaded ★."
+
+        elif key == "x":
+            if states[index] != "none":
+                p = pdf_paths[index]
+                if p and os.path.exists(p):
+                    os.remove(p)
+                pdf_paths[index] = None
+                states[index] = "none"
+                util.log_event(scanlog_path, {"type": "remove", "xid": xid})
+                message = "removed."
+            else:
+                message = "nothing to remove."
 
     print("done!")
 
