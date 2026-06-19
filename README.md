@@ -3,13 +3,6 @@ Firehose
 
 Install with `pip install -e .`.
 
-TODO:
-
-* At the moment, this just indexes and streams arxiv. I would like to
-  generalise it to streaming other lists of abstracts, like conferences,
-  lesswrong/alignment forum, the alignment newsletter, maybe twitter in some
-  form...
-
 Harvest
 -------
 
