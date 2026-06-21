@@ -25,8 +25,8 @@ def harvest(
     """
     # load subscribed classes and resolve data paths from config
     config = util.load_config(config_path)
-    my_classes = util.subscribed_classes(config)
-    cache_path = util.resolve_paths(config, data_dir=data_dir).cache
+    my_classes = set(config["arxiv"]["categories"])
+    cache_path = util.data_paths(config, data_dir=data_dir).cache
 
     # configure client
     sickle = Sickle(util.OAI_API_URL)

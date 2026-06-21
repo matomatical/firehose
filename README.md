@@ -50,3 +50,17 @@ Read log
 various visualisations of reading progress.
 
 TODO: Document.
+
+
+Tests
+-----
+
+Install the test dependencies and run the suite with `pytest`:
+
+```
+pip install -e ".[test]"
+pytest
+```
+
+The tests live in `tests/` and don't touch the network or `data/`, so they're
+safe to run any time.

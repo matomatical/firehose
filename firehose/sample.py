@@ -30,7 +30,8 @@ def sample(
     Download and present abstracts for a batch of papers.
     """
     config = util.load_config(config_path)
-    paths = util.resolve_paths(config, data_dir=data_dir, download_dir=download_dir)
+    paths = util.data_paths(config, data_dir=data_dir)
+    download_dir = download_dir or config["paths"]["downloads"]
 
     # load cached headers with overlapping classes
     print("loading papers from disk...")
@@ -55,8 +56,7 @@ def sample(
         backwards=backwards,
         randomise=randomise,
         offset=offset,
-        modern=modern,
-        cutoff=util.modern_cutoff(config),
+        cutoff=config["scan"]["modern_cutoff"] if modern else None,
     )
     print(f"selected {len(toread)} papers to scan")
 
@@ -117,7 +117,7 @@ def sample(
         papers,
         scanlog_path=paths.scanlog,
         readlog_path=paths.readlog,
-        download_dir=paths.downloads,
+        download_dir=download_dir,
     )
     print("done!")
 
@@ -130,14 +130,13 @@ def select_papers(
     backwards: bool = False,
     randomise: bool = False,
     offset: int | None = None,
-    modern: bool = True,
-    cutoff: datetime.date = util.DEFAULT_MODERN_CUTOFF,
+    cutoff: datetime.date | None = None,
     rng=random,
 ) -> list[tuple[str, datetime.date]]:
     """Choose which (xid, date) papers to scan from the cache.
 
-    Drops already-read ids, then (when `modern`) papers dated on or before
-    `cutoff`, then takes a window of size `n`:
+    Drops already-read ids, then (when a `cutoff` is given) papers dated on or
+    before `cutoff`, then takes a window of size `n`:
 
       * default:        the last `n` candidates, reversed (newest first);
       * backwards=True:  the first `n` candidates, in cache order (oldest first);
@@ -150,7 +149,7 @@ def select_papers(
     if n <= 0:
         return []
     unread = [(xid, date) for xid, date in cache.items() if xid not in read]
-    if modern:
+    if cutoff is not None:
         unread = [(xid, date) for xid, date in unread if date > cutoff]
     if offset is not None:
         unread = unread[-offset:]

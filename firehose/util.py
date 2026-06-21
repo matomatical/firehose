@@ -13,84 +13,42 @@ import requests
 import tqdm
 
 
-# firehose reads its settings from a TOML config (config.toml at the top level
-# by default; override with --config-path). config.toml is configuration, not
-# data, so it stays at the top level rather than under the data directory.
-# Path precedence is:  CLI argument  >  [paths] in the config  >  default below.
+# firehose config
 CONFIG_PATH = "config.toml"
-DEFAULT_DATA_DIR = "data"
-DEFAULT_DOWNLOAD_DIR = "~/storage/library/readings"
 
 # arXiv's OAI-PMH endpoint, shared by `harvest` and `classes`.
 OAI_API_URL = "https://oaipmh.arxiv.org/oai"
 
-# Papers dated on or before this are "old" and dropped by sample's default
-# (modern) scan; roughly when Matthew started using firehose. Overridable via
-# [scan].modern_cutoff in config.toml; this is the fallback when it is unset.
-DEFAULT_MODERN_CUTOFF = datetime.date(2025, 4, 15)
+
+# # # 
+# Config loading utilities
 
 
-def load_config(path: str) -> dict:
-    """Parse the TOML config file."""
+def load_config(path: str = CONFIG_PATH) -> dict:
+    """Parse TOML config file."""
     with open(path, "rb") as f:
         return tomllib.load(f)
 
 
-def subscribed_classes(config: dict) -> set[str]:
-    """Subscribed arXiv setSpecs: the [arxiv].categories list. Commented-out
-    entries (the available-but-not-followed catalog) are TOML comments, so the
-    parser drops them automatically.
-    """
-    return set(config["arxiv"]["categories"])
-
-
-def modern_cutoff(config: dict) -> datetime.date:
-    """The [scan].modern_cutoff date (papers on/before it are dropped by sample's
-    default scan). TOML parses a bare YYYY-MM-DD as a date; falls back to
-    DEFAULT_MODERN_CUTOFF when the key (or [scan] table) is absent.
-    """
-    return config.get("scan", {}).get("modern_cutoff", DEFAULT_MODERN_CUTOFF)
-
-
-def resolve_paths(
+def data_paths(
     config: dict,
     *,
     data_dir: str | None = None,
-    download_dir: str | None = None,
 ) -> types.SimpleNamespace:
-    """Resolve the data-file and download paths, with optional per-run
-    overrides. Precedence for each: the explicit argument > [paths] in the
-    config > the built-in default.
     """
-    paths = config.get("paths", {})
-    data_dir = os.path.expanduser(data_dir or paths.get("data", DEFAULT_DATA_DIR))
-    download_dir = os.path.expanduser(
-        download_dir or paths.get("downloads", DEFAULT_DOWNLOAD_DIR)
-    )
+    Paths for data, with optional override.
+    """
+    data_dir = os.path.expanduser(data_dir or config["paths"]["data"])
     return types.SimpleNamespace(
         data_dir=data_dir,
         cache=os.path.join(data_dir, "arxiv.txt"),
         readlog=os.path.join(data_dir, "readlog.txt"),
         scanlog=os.path.join(data_dir, "scanlog.jsonl"),
-        downloads=download_dir,
     )
 
 
-def paths(
-    config_path: str = CONFIG_PATH,
-    *,
-    data_dir: str | None = None,
-    download_dir: str | None = None,
-) -> types.SimpleNamespace:
-    """Convenience: load the config and resolve paths in one call."""
-    return resolve_paths(
-        load_config(config_path),
-        data_dir=data_dir,
-        download_dir=download_dir,
-    )
-
-
-# -- on-disk data format -------------------------------------------------------
+# # #
+# File parsing utilities
 #
 # arxiv.txt (the paper cache) and readlog.txt (the seen-index) are plain text,
 # one paper per logical entry, sorted by date. To keep them small while staying
@@ -103,17 +61,56 @@ def paths(
 #     2025-08-12:
 #     2508.00002
 #
-# The grouped form is a strict superset of the older flat form: a line may be
-# either a bare "<id>" (dated by the header above it) or a self-contained
-# "<id> <YYYY-MM-DD>". The loader accepts both, so legacy flat files still read
-# identically. save_cache, the one-off migration, and readlog's live append
-# (append_readlog, driven by sample.Readlog) all emit the compact grouped form.
+# save_cache and readlog's live append (append_readlog, driven by
+# sample.Readlog) both emit this grouped form.
+
+
+# FLAG: have the feeling that load cache and load readlog utilities should both
+# be more similar:
+# (1) we could move OAI adding/stripping entirely internally to harvester.
+# (2) load readlog probably does want to return a tuple with the latest date
+#     for initialising the readlog writer, does this bring it in line with
+#     that part of the cache loading function?
+
+
+def load_cache(
+    path: str,
+    strip_prefix: bool = False,
+) -> tuple[dict[str, datetime.date], datetime.date]:
+    """
+    Load a list of dated paper ids from arxiv cache.
+    """
+    with open(path, 'r') as f:
+        # 1st line has form "latest datestamp: DATESTAMP"
+        latest_date = to_date(next(f).strip().split(": ")[-1])
+        # subsequent lines are papers (see the format note above)
+        lines = f.read().splitlines()
+    prefix = "" if strip_prefix else "oai:arXiv.org:"
+    cache = {}
+    for xid, date in _parse_dated_lines(tqdm.tqdm(lines, ncols=80)):
+        cache[prefix + xid] = date
+    return cache, latest_date
+
+
+def load_readlog(
+    path: str,
+) -> dict[str, datetime.date]:
+    """
+    Load a list of dated paper ids from readlog, and there is no need for
+    stripping OAI prefix here.
+    """
+    readlog = {}
+    with open(path, 'r') as f:
+        for xid, date in _parse_dated_lines(f):
+            readlog[xid] = date
+    return readlog
+
 
 def _parse_dated_lines(lines):
-    """Yield (id, date) per entry from an iterable of lines, accepting both the
-    grouped form (a "<YYYY-MM-DD>:" header followed by bare "<id>" lines) and
-    the flat self-dated form ("<id> <YYYY-MM-DD>"). Blank lines are skipped.
-    Each grouped date is constructed once and shared across the group's ids.
+    """Yield (id, date) per entry from an iterable of lines. Each entry is a bare
+    "<id>" dated by the nearest "<YYYY-MM-DD>:" header above it; blank lines are
+    skipped, and each header date is constructed once and shared across the ids
+    beneath it.
     """
     cur = None
     for line in lines:
@@ -122,11 +119,31 @@ def _parse_dated_lines(lines):
             continue
         if line.endswith(":"):
             cur = to_date(line[:-1])
-        elif " " in line:
-            xid, datestamp = line.split()
-            yield xid, to_date(datestamp)
         else:
             yield line, cur
+
+
+# # # 
+# File writing utilities
+
+
+def save_cache(
+    path: str,
+    latest_date: datetime.date,
+    cache: dict[str, datetime.date],
+):
+    """
+    Write list of dated paper ids to on-disk arxiv cache.
+
+    Keys are expected to carry the OAI prefix ("oai:arXiv.org:"), which is
+    stripped on the way out, so ids are stored bare. load_cache re-adds the
+    prefix by default (strip_prefix=False).
+    """
+    plen = len("oai:arXiv.org:")
+    sorted_cache = sorted((date, xid[plen:]) for xid, date in cache.items())
+    with open(path, 'w') as f:
+        f.write(f"latest datestamp: {to_datestamp(latest_date)}\n")
+        _write_grouped(f, tqdm.tqdm(sorted_cache, ncols=80))
 
 
 def _write_grouped(f, dated_ids):
@@ -141,53 +158,12 @@ def _write_grouped(f, dated_ids):
         f.write(f"{xid}\n")
 
 
-def load_cache(
-    path: str,
-    strip_prefix: bool = False,
-) -> tuple[dict[str, datetime.date], datetime.date]:
-    with open(path, 'r') as f:
-        # 1st line has form "latest datestamp: DATESTAMP"
-        latest_date = to_date(next(f).strip().split(": ")[-1])
-        # subsequent lines are papers (grouped or flat; see format note above)
-        lines = f.read().splitlines()
-    prefix = "" if strip_prefix else "oai:arXiv.org:"
-    cache = {}
-    for xid, date in _parse_dated_lines(tqdm.tqdm(lines, ncols=80)):
-        cache[prefix + xid] = date
-    return cache, latest_date
-
-
-def save_cache(
-    path: str,
-    latest_date: datetime.date,
-    cache: dict[str, datetime.date],
-):
-    """Write the paper cache to disk.
-
-    Keys are expected to carry the OAI prefix ("oai:arXiv.org:"), which is
-    stripped on the way out, so ids are stored bare and grouped by date.
-    load_cache re-adds the prefix by default (strip_prefix=False).
-    """
-    plen = len("oai:arXiv.org:")
-    sorted_cache = sorted((date, xid[plen:]) for xid, date in cache.items())
-    with open(path, 'w') as f:
-        f.write(f"latest datestamp: {to_datestamp(latest_date)}\n")
-        _write_grouped(f, tqdm.tqdm(sorted_cache, ncols=80))
-
-
-def load_readlog(
-    path: str,
-) -> dict[str, datetime.date]:
-    readlog = {}
-    with open(path, 'r') as f:
-        for xid, date in _parse_dated_lines(f):
-            readlog[xid] = date
-    return readlog
-
+# FLAG: This seems bad, we should have already read the file by now and caught
+# the latest date when we did.
 
 def last_header_date(path: str) -> datetime.date | None:
     """The date of the last "<date>:" group header in a grouped data file, or
-    None if there is none (missing/empty file, or only legacy flat lines). Seeds
+    None if there is none (missing/empty file, or no "<date>:" headers). Seeds
     the live readlog appender so it knows whether a fresh header is needed.
     """
     last = None
@@ -221,15 +197,41 @@ def append_readlog(
     return date
 
 
+# # # 
+# Event logging utilities
+
+
+def log_event(path: str, event: dict) -> None:
+    """
+    Append one event as a JSON line to the scan log at `path`, stamped with the
+    current local time under the key "t". Each call is a self-contained append,
+    so the log is written in real time and survives a crash mid-session.
+    """
+    record = {"t": datetime.datetime.now().isoformat(), **event}
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    with open(path, "a") as f:
+        f.write(json.dumps(record) + "\n")
+
+
+# # # 
+# Date utilities
+
+
 def to_date(datestamp: str) -> datetime.date:
-    # robust method
-    # return datetime.datetime.strptime(datestamp, '%Y-%m-%d').date()
     # faster method, taking advantage of fixed format
     return datetime.date(*map(int, datestamp.split('-')))
+    # robust method, alternative previously tried.
+    # return datetime.datetime.strptime(datestamp, '%Y-%m-%d').date()
 
 
 def to_datestamp(date: datetime.date) -> str:
     return date.strftime('%Y-%m-%d')
+
+
+# # # 
+# ArXiv paper handling utilities
 
 
 def to_name(result) -> str:
@@ -288,6 +290,10 @@ def download_paper(paper_id: str, path: str):
     bar.close()
 
 
+# # # 
+# Platform-independent utilities
+
+
 def copy_to_clipboard(text: str) -> bool:
     """
     Copy `text` to the system clipboard using the platform-appropriate tool.
@@ -344,19 +350,5 @@ def open_url(url: str) -> bool:
         return True
     except (OSError, subprocess.SubprocessError):
         return False
-
-
-def log_event(path: str, event: dict) -> None:
-    """
-    Append one event as a JSON line to the scan log at `path`, stamped with the
-    current local time under the key "t". Each call is a self-contained append,
-    so the log is written in real time and survives a crash mid-session.
-    """
-    record = {"t": datetime.datetime.now().isoformat(), **event}
-    parent = os.path.dirname(path)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
-    with open(path, "a") as f:
-        f.write(json.dumps(record) + "\n")
 
 

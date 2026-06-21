@@ -14,8 +14,9 @@ def all_submitted_dates(
     data_dir: str | None = None,
     save_as: str | None = None,
 ):
+    config = util.load_config(config_path)
     print("loading all submit dates from paper cache...")
-    cache, _ = util.load_cache(path=util.paths(config_path, data_dir=data_dir).cache)
+    cache, _ = util.load_cache(path=util.data_paths(config, data_dir=data_dir).cache)
     print(f"loaded {len(cache)} papers")
 
     print("printing calendar...")
@@ -32,8 +33,9 @@ def all_submitted_years(
     config_path: str = util.CONFIG_PATH,
     data_dir: str | None = None,
 ):
+    config = util.load_config(config_path)
     print("loading all submit dates from paper cache...")
-    cache, _ = util.load_cache(path=util.paths(config_path, data_dir=data_dir).cache)
+    cache, _ = util.load_cache(path=util.data_paths(config, data_dir=data_dir).cache)
     print(f"loaded {len(cache)} papers")
     
     years = collections.Counter([date.year for date in cache.values()])
@@ -47,8 +49,9 @@ def all_submitted_months(
     config_path: str = util.CONFIG_PATH,
     data_dir: str | None = None,
 ):
+    config = util.load_config(config_path)
     print("loading all submit dates from paper cache...")
-    cache, _ = util.load_cache(path=util.paths(config_path, data_dir=data_dir).cache)
+    cache, _ = util.load_cache(path=util.data_paths(config, data_dir=data_dir).cache)
     print(f"loaded {len(cache)} papers")
     
     year_months = collections.Counter([
@@ -70,7 +73,8 @@ def reading_calendar(
     data_dir: str | None = None,
     save_as: str | None = None,
 ):
-    paths = util.paths(config_path, data_dir=data_dir)
+    config = util.load_config(config_path)
+    paths = util.data_paths(config, data_dir=data_dir)
     print("loading read log...")
     readlog = util.load_readlog(path=paths.readlog)
     print(f"loaded {len(readlog)} already-read papers")
@@ -110,7 +114,8 @@ def linear(
     batch_size: int = 100,
     save_as: str | None = None,
 ):
-    paths = util.paths(config_path, data_dir=data_dir)
+    config = util.load_config(config_path)
+    paths = util.data_paths(config, data_dir=data_dir)
     print("loading all submitted ids from paper cache...")
     cache, _ = util.load_cache(path=paths.cache, strip_prefix=True)
     all_xids = list(cache.keys())
@@ -140,7 +145,8 @@ def hilbert(
     config_path: str = util.CONFIG_PATH,
     data_dir: str | None = None,
 ):
-    paths = util.paths(config_path, data_dir=data_dir)
+    config = util.load_config(config_path)
+    paths = util.data_paths(config, data_dir=data_dir)
     print("loading all submitted ids from paper cache...")
     cache, _ = util.load_cache(path=paths.cache, strip_prefix=True)
     all_xids = {xid: i for i, xid in enumerate(cache.keys())}
@@ -157,13 +163,12 @@ def hilbert(
             new_titles = False
             for line in f:
                 line = line.strip()
-                # skip blanks and "<date>:" group headers; an entry is a bare
-                # "<id>" or a flat "<id> <date>", so the id is token 0 either way
-                # (see the data-format note in util.py).
+                # skip blanks and "<date>:" group headers; every other line is a
+                # bare paper id (see the data-format note in util.py).
                 if not line or line.endswith(":"):
                     continue
                 new_titles = True
-                xid = line.split()[0]
+                xid = line
                 if xid in all_xids:
                     read_vec[all_xids[xid]] = True
 

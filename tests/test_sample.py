@@ -71,9 +71,22 @@ def test_select_papers_modern_filters_on_or_before_cutoff():
         "new1": datetime.date(2025, 4, 16),     # kept
         "new2": datetime.date(2025, 5, 1),      # kept
     }
-    assert {xid for xid, _ in select_papers(cache, set(), n=10)} == {"new1", "new2"}
-    # modern=False keeps the old ones
-    assert {xid for xid, _ in select_papers(cache, set(), n=10, modern=False)} == {
+    # with cutoff
+    papers_with_cutoff = select_papers(
+        cache,
+        set(),
+        n=10,
+        cutoff=datetime.date(2025, 4, 15),
+    )
+    assert {xid for xid, _ in papers_with_cutoff} == {"new1", "new2"}
+    # without cutoff
+    papers_without_cutoff = select_papers(
+        cache,
+        set(),
+        n=10,
+        cutoff=None,
+    )
+    assert {xid for xid, _ in papers_without_cutoff} == {
         "older", "cutoff", "new1", "new2",
     }
 

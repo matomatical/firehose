@@ -12,6 +12,34 @@ import types
 from firehose import util
 
 
+# -- data path resolution ------------------------------------------------------
+
+# data_paths joins the data-dir filenames onto a data dir, which comes from an
+# explicit override else [paths].data in the config. (test_config.py's
+# resolve_paths tests went with that helper; these cover its replacement, so the
+# path wiring keeps a test after the rename.)
+
+def test_data_paths_from_config():
+    p = util.data_paths({"paths": {"data": "mydata"}})
+    assert p.data_dir == "mydata"
+    assert p.cache == os.path.join("mydata", "arxiv.txt")
+    assert p.readlog == os.path.join("mydata", "readlog.txt")
+    assert p.scanlog == os.path.join("mydata", "scanlog.jsonl")
+
+
+def test_data_paths_override_wins():
+    p = util.data_paths({"paths": {"data": "mydata"}}, data_dir="other")
+    assert p.data_dir == "other"
+    assert p.cache == os.path.join("other", "arxiv.txt")
+
+
+def test_data_paths_expands_user():
+    p = util.data_paths({"paths": {"data": "~/d"}})
+    assert p.data_dir == os.path.expanduser("~/d")
+    q = util.data_paths({"paths": {"data": "ignored"}}, data_dir="~/e")
+    assert q.data_dir == os.path.expanduser("~/e")
+
+
 # -- cache save/load round-trip + on-disk format -------------------------------
 
 # The cache (data/arxiv.txt) is firehose's master paper index, so a save/load
@@ -75,23 +103,24 @@ def test_cache_round_trip_preserves_entries_and_latest_date(tmp_path):
     }
 
 
-def test_load_cache_reads_grouped_and_legacy_flat(tmp_path):
-    # The loader accepts a grouped block AND a legacy flat "<id> <date>" line in
-    # the same file (the grouped form is a strict superset of the old format).
+def test_load_cache_reads_grouped(tmp_path):
+    # the loader reads bare ids dated by the "<date>:" header above them; the
+    # first line is always the "latest datestamp" watermark.
     path = str(tmp_path / "arxiv.txt")
     open(path, "w").write(
         "latest datestamp: 2026-03-05\n"
+        "1990-01-01:\n"
+        "cs/9301111\n"
         "2025-08-12:\n"          # date header -> the two bare ids below share it
         "2508.00001\n"
         "2508.00002\n"
-        "cs/9301111 1990-01-01\n"  # legacy flat self-dated line still works
     )
     bare, latest = util.load_cache(path, strip_prefix=True)
     assert latest == datetime.date(2026, 3, 5)
     assert bare == {
+        "cs/9301111": datetime.date(1990, 1, 1),
         "2508.00001": datetime.date(2025, 8, 12),
         "2508.00002": datetime.date(2025, 8, 12),
-        "cs/9301111": datetime.date(1990, 1, 1),
     }
 
 
@@ -109,7 +138,7 @@ def test_cache_round_trip_empty(tmp_path):
 
 def test_load_readlog(tmp_path):
     path = tmp_path / "readlog.txt"
-    path.write_text("2504.15284 2025-04-23\n2504.15286 2025-04-24\n")
+    path.write_text("2025-04-23:\n2504.15284\n2025-04-24:\n2504.15286\n")
     assert util.load_readlog(str(path)) == {
         "2504.15284": datetime.date(2025, 4, 23),
         "2504.15286": datetime.date(2025, 4, 24),
@@ -119,7 +148,7 @@ def test_load_readlog(tmp_path):
 def test_load_readlog_duplicate_id_keeps_last(tmp_path):
     # readlog is a dict keyed by id; a repeated id takes the later date.
     path = tmp_path / "readlog.txt"
-    path.write_text("2504.15284 2025-04-23\n2504.15284 2025-05-01\n")
+    path.write_text("2025-04-23:\n2504.15284\n2025-05-01:\n2504.15284\n")
     assert util.load_readlog(str(path)) == {"2504.15284": datetime.date(2025, 5, 1)}
 
 
@@ -145,11 +174,7 @@ def test_load_readlog_reads_grouped(tmp_path):
 def test_last_header_date(tmp_path):
     path = str(tmp_path / "readlog.txt")
     assert util.last_header_date(path) is None                 # missing file
-    open(path, "w").write("2504.1 2025-04-23\n2504.2 2025-04-24\n")
-    assert util.last_header_date(path) is None                 # only legacy flat
     open(path, "w").write("2025-04-23:\n2504.1\n2025-05-01:\n2504.2\n")
-    assert util.last_header_date(path) == datetime.date(2025, 5, 1)
-    open(path, "a").write("2504.3 2025-05-02\n")               # flat line after
     assert util.last_header_date(path) == datetime.date(2025, 5, 1)  # last header
 
 
