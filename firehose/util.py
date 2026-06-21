@@ -11,6 +11,12 @@ import requests
 import tqdm
 
 
+# All generated/logged data files live under this directory (resolved relative
+# to the directory firehose is run from). classes.txt stays at the top level as
+# configuration, not data.
+DATA_DIR = "data"
+
+
 def load_my_classes(
     path: str,
 ) -> set[str]:

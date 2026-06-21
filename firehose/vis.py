@@ -1,6 +1,7 @@
 import calendar
 import collections
 import datetime
+import os
 import time
 import typing
 
@@ -9,8 +10,8 @@ import matthewplotlib as mp
 from firehose import util
 
 
-READLOG_PATH = "rdlog.txt"
-CACHE_PATH = "arxiv.txt"
+READLOG_PATH = os.path.join(util.DATA_DIR, "rdlog.txt")
+CACHE_PATH = os.path.join(util.DATA_DIR, "arxiv.txt")
 
 
 def all_submitted_dates(

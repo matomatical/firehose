@@ -6,7 +6,7 @@ Install with `pip install -e .`.
 Harvest
 -------
 
-`firehose-harvest` creates a file, `arxiv.txt`, which is a list of all articles
+`firehose-harvest` creates a file, `data/arxiv.txt`, which is a list of all articles
 within a configurable list of classes, along with their submission datestamps.
 The format is something like this:
 

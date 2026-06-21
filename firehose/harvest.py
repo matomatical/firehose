@@ -13,7 +13,7 @@ API_URL = "https://oaipmh.arxiv.org/oai"
 MAX_RPS = 1/3
 BATCH_SIZE = 3_500
 # BATCH_SIZE = 20_000 # for headers only
-CACHE_PATH = "arxiv.txt"
+CACHE_PATH = os.path.join(util.DATA_DIR, "arxiv.txt")
 CLASSES_PATH = "classes.txt"
 
 
