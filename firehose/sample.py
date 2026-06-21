@@ -234,7 +234,49 @@ def _timing_line(stopwatch: Stopwatch, nseen: int, paused: bool) -> str:
     return line
 
 
-def _execute(effect, *, scanlog_path, readlog_path, download_dir, pdf_paths, readlog_state):
+class Readlog:
+    """The seen-index for a scan session: appends each viewed id in grouped form
+    (a "<date>:" header only when the day changes), seeding its open group from
+    the file so a same-day resume continues that group rather than duplicating a
+    header. Keeps readlog compact at write time -- no later re-grouping pass.
+    """
+
+    def __init__(self, path):
+        self.path = path
+        self._open_date = util.last_header_date(path)
+
+    def log(self, xid, date):
+        self._open_date = util.append_readlog(self.path, xid, date, self._open_date)
+
+
+class Downloads:
+    """Tracks the PDFs grabbed during a scan session so a later undo can remove
+    them. Files land in <download_dir>/<YYYY-MM>/ with names from util.to_filename,
+    de-duplicated with a "(duplicate)" suffix.
+    """
+
+    def __init__(self, download_dir):
+        self.download_dir = os.path.expanduser(download_dir)
+        self._paths = {}
+
+    def download(self, xid, name, xidv):
+        dirpath = os.path.join(self.download_dir, datetime.date.today().strftime("%Y-%m"))
+        filename = util.to_filename(name, xidv)
+        path = os.path.join(dirpath, filename)
+        os.makedirs(dirpath, exist_ok=True)
+        while os.path.exists(path):
+            filename = f"{filename[:-4]} (duplicate).pdf"
+            path = os.path.join(dirpath, filename)
+        util.download_paper(paper_id=xid, path=path)
+        self._paths[xid] = path
+
+    def delete(self, xid):
+        path = self._paths.pop(xid, None)
+        if path and os.path.exists(path):
+            os.remove(path)
+
+
+def _execute(effect, *, scanlog_path, readlog, downloads):
     """Carry out one declarative effect emitted by the Scanner."""
     if isinstance(effect, scn.Log):
         util.log_event(scanlog_path, effect.event)
@@ -247,50 +289,28 @@ def _execute(effect, *, scanlog_path, readlog_path, download_dir, pdf_paths, rea
             print(f"no opener available; url: {effect.url}")
 
     elif isinstance(effect, scn.Readlog):
-        # append in grouped form (a "<date>:" header only when the day changes),
-        # threading the open group date through readlog_state so the file stays
-        # compact without a later re-grouping pass.
-        readlog_state["open_date"] = util.append_readlog(
-            readlog_path, effect.xid, datetime.date.today(), readlog_state["open_date"]
-        )
+        readlog.log(effect.xid, datetime.date.today())
 
     elif isinstance(effect, scn.Download):
-        dirpath = os.path.join(
-            os.path.expanduser(download_dir),
-            datetime.date.today().strftime('%Y-%m'),
-        )
-        filename = util.to_filename(effect.name, effect.xidv)
-        path = os.path.join(dirpath, filename)
-        os.makedirs(dirpath, exist_ok=True)
-        while os.path.exists(path):
-            filename = f"{filename[:-4]} (duplicate).pdf"
-            path = os.path.join(dirpath, filename)
-        util.download_paper(paper_id=effect.xid, path=path)
-        pdf_paths[effect.xid] = path
+        downloads.download(effect.xid, effect.name, effect.xidv)
 
     elif isinstance(effect, scn.DeletePDF):
-        path = pdf_paths.pop(effect.xid, None)
-        if path and os.path.exists(path):
-            os.remove(path)
+        downloads.delete(effect.xid)
 
 
 def _run_session(papers, *, scanlog_path, readlog_path, download_dir):
     """Drive the interactive scan: render, read a key, run the Scanner's effects."""
     sc = scn.Scanner(papers)
-    pdf_paths = {}
-    # seed the appender with the file's current trailing group so resuming a scan
-    # on the same day continues that day's group instead of opening a new header.
-    readlog_state = {"open_date": util.last_header_date(readlog_path)}
+    readlog = Readlog(readlog_path)
+    downloads = Downloads(download_dir)
 
     def run(effects):
         for effect in effects:
             _execute(
                 effect,
                 scanlog_path=scanlog_path,
-                readlog_path=readlog_path,
-                download_dir=download_dir,
-                pdf_paths=pdf_paths,
-                readlog_state=readlog_state,
+                readlog=readlog,
+                downloads=downloads,
             )
 
     run(sc.start())

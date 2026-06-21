@@ -105,10 +105,9 @@ def paths(
 #
 # The grouped form is a strict superset of the older flat form: a line may be
 # either a bare "<id>" (dated by the header above it) or a self-contained
-# "<id> <YYYY-MM-DD>". The loader accepts both, so old files and grouped files
-# read identically, and readlog's live append path keeps writing the flat,
-# self-dated form (each append is independent and crash-safe). save_cache and the
-# one-off migration emit the compact grouped form.
+# "<id> <YYYY-MM-DD>". The loader accepts both, so legacy flat files still read
+# identically. save_cache, the one-off migration, and readlog's live append
+# (append_readlog, driven by sample.Readlog) all emit the compact grouped form.
 
 def _parse_dated_lines(lines):
     """Yield (id, date) per entry from an iterable of lines, accepting both the

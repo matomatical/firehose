@@ -1,8 +1,9 @@
 """
-Tests for firehose.sample's pure helpers: _key_to_command (keys -> Scanner
-commands) and select_papers (which papers to scan, given the cache + readlog).
-Both are pure — no terminal, network, or clock. (The Scanner side of the input
-layer, commands -> effects, is covered in test_scanner.py.)
+Tests for firehose.sample's helpers: the pure _key_to_command (keys -> Scanner
+commands) and select_papers (which papers to scan, given the cache + readlog),
+plus the session-state classes Readlog and Downloads (plain-file + mocked I/O,
+no terminal or network). (The Scanner side of the input layer, commands ->
+effects, is covered in test_scanner.py.)
 """
 
 import datetime
@@ -10,7 +11,8 @@ import random
 
 import readchar
 
-from firehose.sample import _key_to_command, select_papers
+from firehose import util
+from firehose.sample import Downloads, Readlog, _key_to_command, select_papers
 
 
 def test_key_to_command_letters():
@@ -98,3 +100,50 @@ def test_select_papers_n_zero_or_negative_returns_empty():
     cache = {f"p{i}": _d(i) for i in range(1, 4)}
     assert select_papers(cache, set(), n=0) == []
     assert select_papers(cache, set(), n=-1) == []
+
+
+# -- session-state classes: Readlog / Downloads --------------------------------
+
+def test_readlog_appends_grouped_across_dates(tmp_path):
+    path = str(tmp_path / "readlog.txt")
+    d1, d2 = datetime.date(2026, 6, 20), datetime.date(2026, 6, 21)
+    rl = Readlog(path)
+    rl.log("a", d1)
+    rl.log("b", d1)   # same day -> no new header
+    rl.log("c", d2)   # new day -> header
+    assert open(path).read() == "2026-06-20:\na\nb\n2026-06-21:\nc\n"
+
+
+def test_readlog_resume_continues_open_group(tmp_path):
+    # a fresh Readlog on an existing file seeds its open group from the last
+    # header, so a same-day resume continues it instead of duplicating the header
+    path = str(tmp_path / "readlog.txt")
+    d = datetime.date(2026, 6, 21)
+    Readlog(path).log("a", d)
+    Readlog(path).log("b", d)          # new instance, same day
+    assert open(path).read() == "2026-06-21:\na\nb\n"
+
+
+def _stub_downloader(monkeypatch):
+    monkeypatch.setattr(
+        util, "download_paper", lambda paper_id, path: open(path, "w").write("PDF")
+    )
+
+
+def test_downloads_dedups_on_filename_collision(tmp_path, monkeypatch):
+    _stub_downloader(monkeypatch)
+    dl = Downloads(str(tmp_path))
+    dl.download("2601.1", "Smith2026 A", "2601.1v1")
+    dl.download("2601.1", "Smith2026 A", "2601.1v1")   # identical -> "(duplicate)"
+    pdfs = [p.name for p in tmp_path.rglob("*.pdf")]
+    assert len(pdfs) == 2 and any("(duplicate)" in n for n in pdfs)
+
+
+def test_downloads_delete_removes_tracked_file(tmp_path, monkeypatch):
+    _stub_downloader(monkeypatch)
+    dl = Downloads(str(tmp_path))
+    dl.download("2601.1", "Smith2026 A", "2601.1v1")
+    assert list(tmp_path.rglob("*.pdf"))               # downloaded
+    dl.delete("2601.1")
+    assert list(tmp_path.rglob("*.pdf")) == []         # removed
+    dl.delete("2601.1")                                # unknown id -> no error
