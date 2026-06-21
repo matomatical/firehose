@@ -1,27 +1,71 @@
+"""
+The `firehose sample` command: download a batch of arXiv abstracts and present
+them to scan, recording views / saves / downloads.
+
+* `sample()` is the entry point and describes the end-to-end pipeline at a high
+  level, loading papers and then presenting them in sequence.
+* The sequence presentation is driven by a functional core `Scanner` state
+  machine taking commands and issuing effects, plus a pure render function
+  `render_frame`.
+* Side-effects are carried out by each effect's `run()` method, acting on a
+  `Session` bundle of stateful managers (`Scanlog`, `Readlog`, `Downloads`,
+  `Stopwatch`).
+"""
+
 import datetime
 import os
 import random
+import textwrap
 import time
+from dataclasses import dataclass
 
 import arxiv
-import tqdm
+import matthewplotlib as mp
 import readchar
+import tqdm
 
 from firehose import util
 from firehose import vis
-from firehose import scanner as scn
+
+
+# semantic scan commands keyed by raw keypress (readchar key constants are
+# escape-sequence strings; an unmapped key -> None via .get, and is ignored)
+KEY_TO_COMMAND = {
+    # quit
+    "q": "quit",
+    readchar.key.ESC: "quit",
+    # navigation
+    readchar.key.LEFT: "back",
+    readchar.key.RIGHT: "forward",
+    # toggle timer
+    readchar.key.SPACE: "pause",
+    # interact with a paper
+    "o": "open",
+    readchar.key.UP: "open",
+    readchar.key.DOWN: "down", # first save, then download
+    "s": "save",
+    "d": "download",
+    "x": "remove",
+}
+
+
+# # # 
+# Entry-point
 
 
 def sample(
     n: int = 100,
     /,
     query: bool = True,
+    # paper selection
     backwards: bool = False,
     randomise: bool = False,
     offset: int | None = None,
     modern: bool = True,
+    # arxiv api interaction
     query_batch_size: int = 100,
     query_wait_time: float = 3.5,
+    # config
     config_path: str = util.CONFIG_PATH,
     data_dir: str | None = None,
     download_dir: str | None = None,
@@ -105,19 +149,34 @@ def sample(
     if len(results_sorted) == 0:
         print("no papers to show.")
         return
-    papers = [_paper_from_result(r) for r in results_sorted]
 
     print("query complete. press q to cancel or anything else to start.")
     if readchar.readkey() == "q":
         return
-    _run_session(
-        papers,
-        scanlog_path=paths.scanlog,
-        readlog_path=paths.readlog,
-        download_dir=download_dir,
-        open_date=last_read_date,
+
+    # start scanning loop!
+    papers = [Paper.from_arxiv_result(r) for r in results_sorted]
+    sc = Scanner(papers)
+    session = Session(
+        scanlog=Scanlog(paths.scanlog),
+        readlog=Readlog(paths.readlog, last_read_date),
+        downloads=Downloads(download_dir),
+        stopwatch=Stopwatch(),
     )
+    for effect in sc.start():
+        effect.run(session)
+    while not sc.done:
+        print(render_frame(sc, session.stopwatch.elapsed()))
+        command = KEY_TO_COMMAND.get(readchar.readkey())
+        if command is None:
+            continue
+        for effect in sc.feed(command):
+            effect.run(session)
     print("done!")
+
+
+# # # 
+# Paper selection algorithm
 
 
 def select_papers(
@@ -131,7 +190,8 @@ def select_papers(
     cutoff: datetime.date | None = None,
     rng=random,
 ) -> list[tuple[str, datetime.date]]:
-    """Choose which (xid, date) papers to scan from the cache.
+    """
+    Choose which (xid, date) papers to scan from the cache.
 
     Drops already-read ids, then (when a `cutoff` is given) papers dated on or
     before `cutoff`, then takes a window of size `n`:
@@ -142,7 +202,8 @@ def select_papers(
 
     `offset`, when given, first narrows to the last `offset` candidates (paging
     back through older unread papers); `n <= 0` selects nothing. Pure: no I/O,
-    clock, or global RNG — pass a seeded `rng` for deterministic sampling in tests.
+    clock, or global RNG — pass a seeded `rng` for deterministic sampling in
+    tests.
     """
     if n <= 0:
         return []
@@ -158,49 +219,251 @@ def select_papers(
     return unread[-n:][::-1]
 
 
-def _paper_from_result(r) -> scn.Paper:
-    """Build a lightweight Paper (decoupled from the arxiv result) for scanning."""
-    xidv = r.entry_id[len("http://arxiv.org/abs/"):]
-    return scn.Paper(
-        xid=xidv.split('v')[0],
-        xidv=xidv,
-        name=util.to_name(r),
-        entry_id=r.entry_id,
-        title=r.title,
-        authors=[str(a) for a in r.authors],
-        categories=[str(c) for c in r.categories],
-        summary=r.summary,
-        published=r.published,
-        updated=r.updated,
-        comment=r.comment,
-    )
+# # # 
+# Pure scanning loop state machine
 
 
-def _key_to_command(key) -> str | None:
-    """Map a raw keypress to a semantic Scanner command (None = ignore)."""
-    if key == "q" or key == readchar.key.ESC:
-        return "quit"
-    if key == readchar.key.LEFT:
-        return "back"
-    if key == readchar.key.RIGHT:
-        return "forward"
-    if key == readchar.key.SPACE:
-        return "pause"
-    if key == "o" or key == readchar.key.UP:
-        return "open"
-    if key == "s":
-        return "save"
-    if key == "d":
-        return "download"
-    if key == readchar.key.DOWN:
-        return "down"
-    if key == "x":
-        return "remove"
-    return None
+class Scanner:
+    """
+    Tracks scanning state (position, per-paper save/download state, pause) and
+    maps semantic commands to effects. No I/O, no clock, no randomness.
+
+    Per-paper state advances none -> saved (☆) -> downloaded (★); `remove`
+    returns it to none. Commands: back, forward, open, save, download, down
+    (progressive save-then-download), remove, pause, quit.
+    """
+
+    def __init__(self, papers):
+        self.papers = list(papers)
+        self.n = len(self.papers)
+        self.index = 0
+        self.states = ["none"] * self.n     # per paper: none | saved | downloaded
+        self.nseen = -1                     # highest index reached so far
+        self.paused = False
+        self.done = False
+        self.message = ""
+
+    @property
+    def current(self):
+        return self.papers[self.index]
+
+    @property
+    def xid(self):
+        return self.current.xid
+
+    @property
+    def state(self):
+        return self.states[self.index]
+
+    def _arrive(self):
+        # effects emitted when landing on the current paper
+        effects = []
+        if self.index > self.nseen:
+            self.nseen = self.index
+            effects.append(MarkRead(self.xid))
+        effects.append(Log({"type": "view", "xid": self.xid}))
+        return effects
+
+    def start(self):
+        """Begin a session: a start event plus the first paper's arrival."""
+        return [Log({"type": "start", "n": self.n})] + self._arrive()
+
+    def feed(self, command):
+        """Apply a semantic command and return the effects the shell must run."""
+        self.message = ""
+
+        # while paused, only resume and quit respond
+        if self.paused:
+            if command == "pause":
+                self.paused = False
+                return [Log({"type": "resume"}), ResumeTimer()]
+            if command == "quit":
+                self.done = True
+                return [Log({"type": "end"})]
+            self.message = "paused — press space to resume"
+            return []
+
+        if command == "pause":
+            self.paused = True
+            return [Log({"type": "pause"}), PauseTimer()]
+
+        if command == "quit":
+            self.done = True
+            return [Log({"type": "end"})]
+
+        if command == "back":
+            if self.index > 0:
+                self.index -= 1
+                return self._arrive()
+            return []
+
+        if command == "forward":
+            if self.index + 1 == self.n:
+                self.done = True
+                return [Log({"type": "end"})]
+            self.index += 1
+            return self._arrive()
+
+        if command == "open":
+            return [Open(self.current.entry_id)]
+
+        if command == "save":
+            return self._save() if self.state == "none" else self._already()
+
+        if command == "download":
+            if self.state != "downloaded":
+                return self._download()
+            else:
+                return self._already()
+
+        if command == "down":
+            # progressive: none -> saved, saved -> downloaded
+            if self.state == "none":
+                return self._save()
+            if self.state == "saved":
+                return self._download()
+            return self._already()
+
+        if command == "remove":
+            return self._remove() if self.state != "none" else self._nothing()
+
+        return []  # unknown command: ignored
+
+    # action helpers
+    def _save(self):
+        self.states[self.index] = "saved"
+        self.message = "saved ☆"
+        return [
+            Log({"type": "save", "xid": self.xid}),
+            Clip(f"- ? {self.current.name}\n"),
+        ]
+
+    def _download(self):
+        self.states[self.index] = "downloaded"
+        self.message = "downloaded ★"
+        return [
+            Log({"type": "download", "xid": self.xid}),
+            Clip(f"- {self.current.name}\n"),
+            Download(self.xid, self.current.xidv, self.current.name),
+        ]
+
+    def _remove(self):
+        was = self.states[self.index]
+        self.states[self.index] = "none"
+        self.message = "removed"
+        effects = [Log({"type": "remove", "xid": self.xid})]
+        if was == "downloaded":
+            effects.append(DeletePDF(self.xid))
+        return effects
+
+    def _already(self):
+        self.message = f"already {self.state}"
+        return []
+
+    def _nothing(self):
+        self.message = "nothing to remove"
+        return []
+
+
+# # # 
+# Paper object
+
+
+@dataclass
+class Paper:
+    xidv: str         # arxiv id with version, e.g. "2601.00001v1"
+    name: str         # util.to_name(result): "Author+Year Title"
+    entry_id: str
+    title: str
+    authors: list
+    categories: list
+    summary: str
+    published: object
+    updated: object
+    comment: object
+
+    @property
+    def xid(self) -> str:
+        """ArXiv id without version, e.g. "2601.00001"."""
+        # TODO: might break for old ids?
+        return self.xidv.split('v')[0]
+
+    @classmethod
+    def from_arxiv_result(cls, r) -> "Paper":
+        """
+        Build a Paper from an arxiv API result object.
+        """
+        xidv = r.entry_id[len("http://arxiv.org/abs/"):]
+        return cls(
+            xidv=xidv,
+            name=util.to_name(r),
+            entry_id=r.entry_id,
+            title=r.title,
+            authors=[str(a) for a in r.authors],
+            categories=[str(c) for c in r.categories],
+            summary=r.summary,
+            published=r.published,
+            updated=r.updated,
+            comment=r.comment,
+        )
+
+
+# # # 
+# Render scanning state
+
+
+GLYPHS = {"none": " ", "saved": "☆", "downloaded": "★"}
+
+
+def render_frame(scanner, elapsed: float):
+    """
+    Build the full terminal frame for the scanner's current paper.
+    """
+    p = scanner.current
+    cats = ', '.join("\033[3m" + str(c) + "\033[0m" for c in p.categories)
+    authors = ', '.join(str(a) for a in p.authors)
+    seen = scanner.nseen + 1
+    average = elapsed / seen if seen > 0 else 0.0
+    glyph = GLYPHS[scanner.state]
+    lines = [
+        '\033[2J\033[H',
+        f"[{scanner.index + 1} / {scanner.n}] "
+        f"{mp.progress((scanner.index + 1) / scanner.n, width=60)} {glyph}",
+        f"{datetime.timedelta(seconds=int(elapsed))} ({average:.2f} seconds/paper)"
+        + (" — PAUSED (space to resume)" if scanner.paused else ""),
+        f"{p.entry_id} {cats}",
+        f"published: {p.published} updated: {p.updated}",
+        "\033[1m" + textwrap.fill(p.title, width=80) + "\033[0m",
+        "\033[2m" + textwrap.fill(authors, width=80) + "\033[0m",
+        textwrap.fill(p.summary, width=80),
+        "",
+    ]
+    if p.comment is not None:
+        lines.append(f"comment: {p.comment}")
+    lines.append("")
+    if scanner.message:
+        lines.append(scanner.message)
+    return "\n".join(lines)
+
+
+# # # 
+# System state managers
+
+
+@dataclass
+class Session:
+    """The stateful per-session managers the effects act on, bundled so each
+    effect's run() takes a single context argument."""
+    scanlog: "Scanlog"
+    readlog: "Readlog"
+    downloads: "Downloads"
+    stopwatch: "Stopwatch"
 
 
 class Stopwatch:
-    """Wall-clock stopwatch that can be paused; drives the live dwell average."""
+    """
+    Wall-clock stopwatch that can be paused; drives the live dwell average.
+    """
 
     def __init__(self):
         self._accum = 0.0
@@ -221,22 +484,24 @@ class Stopwatch:
             self._paused = False
 
 
-def _timing_line(stopwatch: Stopwatch, nseen: int, paused: bool) -> str:
-    total = stopwatch.elapsed()
-    seen = nseen + 1
-    average = total / seen if seen > 0 else 0.0
-    line = f"{datetime.timedelta(seconds=int(total))} ({average:.2f} seconds/paper)"
-    if paused:
-        line += "   — PAUSED (space to resume)"
-    return line
+class Scanlog:
+    """
+    The scan event log for a session: appends each event as a JSON line to
+    scanlog.jsonl (util.log_event stamps it with the time on write).
+    """
+
+    def __init__(self, path):
+        self.path = path
+
+    def log(self, event):
+        util.log_event(self.path, event)
 
 
 class Readlog:
-    """The seen-index for a scan session: appends each viewed id in grouped form
+    """
+    The seen-index for a scan session: appends each viewed id in grouped form
     (a "<date>:" header only when the day changes). Seeded with the readlog's
-    last date (from load_readlog) so a same-day resume continues that group
-    rather than duplicating a header. Keeps readlog compact at write time -- no
-    later re-grouping pass.
+    last date (from load_readlog) so a same-day resume continues that group.
     """
 
     def __init__(self, path, open_date=None):
@@ -248,9 +513,10 @@ class Readlog:
 
 
 class Downloads:
-    """Tracks the PDFs grabbed during a scan session so a later undo can remove
-    them. Files land in <download_dir>/<YYYY-MM>/ with names from util.to_filename,
-    de-duplicated with a "(duplicate)" suffix.
+    """
+    Tracks the PDFs grabbed during a scan session so a later undo can remove
+    them. Files land in <download_dir>/<YYYY-MM>/ with names from
+    util.to_filename, de-duplicated with a "(duplicate)" suffix.
     """
 
     def __init__(self, download_dir):
@@ -274,78 +540,84 @@ class Downloads:
             os.remove(path)
 
 
-def _execute(effect, *, scanlog_path, readlog, downloads):
-    """Carry out one declarative effect emitted by the Scanner."""
-    if isinstance(effect, scn.Log):
-        util.log_event(scanlog_path, effect.event)
-
-    elif isinstance(effect, scn.Clip):
-        util.copy_to_clipboard(effect.text)
-
-    elif isinstance(effect, scn.Open):
-        if not util.open_url(effect.url):
-            print(f"no opener available; url: {effect.url}")
-
-    elif isinstance(effect, scn.Readlog):
-        readlog.log(effect.xid, datetime.date.today())
-
-    elif isinstance(effect, scn.Download):
-        downloads.download(effect.xid, effect.name, effect.xidv)
-
-    elif isinstance(effect, scn.DeletePDF):
-        downloads.delete(effect.xid)
+# # #
+# Declarative effect objects
+#
+# The Scanner emits these inert data objects; the shell runs each effect's
+# run(session) method, which performs the side effect via the Session's stateful
+# managers (each effect uses the parts it needs).
 
 
-def _run_session(papers, *, scanlog_path, readlog_path, download_dir, open_date=None):
-    """Drive the interactive scan: render, read a key, run the Scanner's effects."""
-    sc = scn.Scanner(papers)
-    readlog = Readlog(readlog_path, open_date)
-    downloads = Downloads(download_dir)
+@dataclass
+class Log:
+    """Append this event to the scan log (stamped with a time on write)."""
+    event: dict
 
-    def run(effects):
-        for effect in effects:
-            _execute(
-                effect,
-                scanlog_path=scanlog_path,
-                readlog=readlog,
-                downloads=downloads,
-            )
-
-    run(sc.start())
-    stopwatch = Stopwatch()
-    while not sc.done:
-        print(scn.render_frame(sc, _timing_line(stopwatch, sc.nseen, sc.paused)))
-        command = _key_to_command(readchar.readkey())
-        if command is None:
-            continue
-        run(sc.feed(command))
-        stopwatch.set_paused(sc.paused)
+    def run(self, session):
+        session.scanlog.log(self.event)
 
 
-def nsample(
-    n: int = 100000,
-    /,
-    backwards: bool = False,
-    randomise: bool = False,
-    offset: int | None = None,
-    modern: bool = True,
-    query_batch_size: int = 100,
-    query_wait_time: float = 3.5,
-    config_path: str = util.CONFIG_PATH,
-    data_dir: str | None = None,
-):
-    """
-    Run 'sample' without downloading (sample --no-query).
-    """
-    sample(
-        n,
-        query=False,
-        backwards=backwards,
-        randomise=randomise,
-        offset=offset,
-        modern=modern,
-        query_batch_size=query_batch_size,
-        query_wait_time=query_wait_time,
-        config_path=config_path,
-        data_dir=data_dir,
-    )
+@dataclass
+class Clip:
+    """Copy this text to the system clipboard."""
+    text: str
+
+    def run(self, session):
+        util.copy_to_clipboard(self.text)
+
+
+@dataclass
+class Open:
+    """Open this URL with the platform browser/opener."""
+    url: str
+
+    def run(self, session):
+        if not util.open_url(self.url):
+            print(f"no opener available; url: {self.url}")
+
+
+@dataclass
+class MarkRead:
+    """Append this paper id to the read log (readlog.txt)."""
+    xid: str
+
+    def run(self, session):
+        session.readlog.log(self.xid, datetime.date.today())
+
+
+@dataclass
+class Download:
+    """Download this paper's PDF."""
+    xid: str
+    xidv: str
+    name: str
+
+    def run(self, session):
+        session.downloads.download(self.xid, self.name, self.xidv)
+
+
+@dataclass
+class DeletePDF:
+    """Delete the PDF previously downloaded for this paper, if any."""
+    xid: str
+
+    def run(self, session):
+        session.downloads.delete(self.xid)
+
+
+@dataclass
+class PauseTimer:
+    """Pause the dwell timer (space while running)."""
+
+    def run(self, session):
+        session.stopwatch.set_paused(True)
+
+
+@dataclass
+class ResumeTimer:
+    """Resume the dwell timer (space while paused)."""
+
+    def run(self, session):
+        session.stopwatch.set_paused(False)
+
+

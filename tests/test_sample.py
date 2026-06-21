@@ -1,48 +1,74 @@
 """
-Tests for firehose.sample's helpers: the pure _key_to_command (keys -> Scanner
-commands) and select_papers (which papers to scan, given the cache + readlog),
-plus the session-state classes Readlog and Downloads (plain-file + mocked I/O,
-no terminal or network). (The Scanner side of the input layer, commands ->
-effects, is covered in test_scanner.py.)
+Tests for firehose.sample: the pure functional core (the Scanner state machine
+and render_frame), the pure helpers (KEY_TO_COMMAND, select_papers), and the
+session-state sinks (Scanlog/Readlog/Downloads) on plain files with mocked I/O.
+No terminal, network, or clipboard.
 """
 
 import datetime
+import json
 import random
 
 import readchar
 
 from firehose import util
-from firehose.sample import Downloads, Readlog, _key_to_command, select_papers
+from firehose.sample import (
+    Scanner, Paper, Log, Clip, Open, MarkRead, Download, DeletePDF,
+    PauseTimer, ResumeTimer, render_frame, KEY_TO_COMMAND,
+    Session, Scanlog, Readlog, Downloads, Stopwatch, select_papers,
+)
 
 
-def test_key_to_command_letters():
-    assert _key_to_command("q") == "quit"
-    assert _key_to_command("o") == "open"
-    assert _key_to_command("s") == "save"
-    assert _key_to_command("d") == "download"
-    assert _key_to_command("x") == "remove"
+def mkpaper(i: int) -> Paper:
+    xid = f"2601.{i:05d}"
+    return Paper(
+        xidv=xid + "v1",
+        name=f"Author{i}2026 Title {i}",
+        entry_id=f"http://arxiv.org/abs/{xid}v1",
+        title=f"Title {i}",
+        authors=["Ada Author", "Bo Boauthor"],
+        categories=["cs.LG", "cs.AI"],
+        summary="A summary.",
+        published="2026-01-01",
+        updated="2026-01-01",
+        comment=None,
+    )
 
 
-def test_key_to_command_special_keys():
-    assert _key_to_command(readchar.key.ESC) == "quit"
-    assert _key_to_command(readchar.key.LEFT) == "back"
-    assert _key_to_command(readchar.key.RIGHT) == "forward"
-    assert _key_to_command(readchar.key.SPACE) == "pause"
-    assert _key_to_command(readchar.key.UP) == "open"
-    assert _key_to_command(readchar.key.DOWN) == "down"
+def papers(n: int) -> list:
+    return [mkpaper(i) for i in range(1, n + 1)]
 
-
-def test_key_to_command_unknown_is_none():
-    assert _key_to_command("z") is None
-    assert _key_to_command("1") is None
-
-
-# -- select_papers: filtering + ordering ---------------------------------------
 
 def _d(day: int) -> datetime.date:
     """A date in May 2025 (after the modern cutoff), parameterised by day-of-month."""
     return datetime.date(2025, 5, day)
 
+
+# -- key bindings --------------------------------------------------------------
+
+def test_key_to_command_letters():
+    assert KEY_TO_COMMAND.get("q") == "quit"
+    assert KEY_TO_COMMAND.get("o") == "open"
+    assert KEY_TO_COMMAND.get("s") == "save"
+    assert KEY_TO_COMMAND.get("d") == "download"
+    assert KEY_TO_COMMAND.get("x") == "remove"
+
+
+def test_key_to_command_special_keys():
+    assert KEY_TO_COMMAND.get(readchar.key.ESC) == "quit"
+    assert KEY_TO_COMMAND.get(readchar.key.LEFT) == "back"
+    assert KEY_TO_COMMAND.get(readchar.key.RIGHT) == "forward"
+    assert KEY_TO_COMMAND.get(readchar.key.SPACE) == "pause"
+    assert KEY_TO_COMMAND.get(readchar.key.UP) == "open"
+    assert KEY_TO_COMMAND.get(readchar.key.DOWN) == "down"
+
+
+def test_key_to_command_unknown_is_none():
+    assert KEY_TO_COMMAND.get("z") is None
+    assert KEY_TO_COMMAND.get("1") is None
+
+
+# -- select_papers: filtering + ordering ---------------------------------------
 
 def test_select_papers_default_takes_last_n_newest_first():
     cache = {f"p{i}": _d(i) for i in range(1, 6)}   # p1..p5 in cache order
@@ -115,7 +141,188 @@ def test_select_papers_n_zero_or_negative_returns_empty():
     assert select_papers(cache, set(), n=-1) == []
 
 
-# -- session-state classes: Readlog / Downloads --------------------------------
+# -- Scanner: arrival / session ------------------------------------------------
+
+def test_start_emits_start_then_arrival():
+    sc = Scanner(papers(2))
+    fx = sc.start()
+    assert fx == [
+        Log({"type": "start", "n": 2}),
+        MarkRead(sc.xid),
+        Log({"type": "view", "xid": sc.xid}),
+    ]
+    assert sc.nseen == 0
+
+
+# -- Scanner: save / download / remove state machine ---------------------------
+
+def test_save_then_remove_no_pdf():
+    sc = Scanner(papers(1)); sc.start()
+    fx = sc.feed("save")
+    assert sc.states[0] == "saved"
+    assert fx == [Log({"type": "save", "xid": sc.xid}), Clip(f"- ? {sc.current.name}\n")]
+    fx = sc.feed("remove")
+    assert sc.states[0] == "none"
+    assert fx == [Log({"type": "remove", "xid": sc.xid})]  # no DeletePDF: only saved
+
+
+def test_download_then_remove_deletes_pdf():
+    sc = Scanner(papers(1)); sc.start()
+    fx = sc.feed("download")
+    assert sc.states[0] == "downloaded"
+    assert fx == [
+        Log({"type": "download", "xid": sc.xid}),
+        Clip(f"- {sc.current.name}\n"),
+        Download(sc.xid, sc.current.xidv, sc.current.name),
+    ]
+    fx = sc.feed("remove")
+    assert sc.states[0] == "none"
+    assert Log({"type": "remove", "xid": sc.xid}) in fx
+    assert DeletePDF(sc.xid) in fx
+
+
+def test_down_is_progressive():
+    sc = Scanner(papers(1)); sc.start()
+    sc.feed("down")
+    assert sc.states[0] == "saved"
+    sc.feed("down")
+    assert sc.states[0] == "downloaded"
+    assert sc.feed("down") == []  # already downloaded
+
+
+def test_save_when_saved_is_noop():
+    sc = Scanner(papers(1)); sc.start()
+    sc.feed("save")
+    assert sc.feed("save") == []
+    assert "already" in sc.message
+
+
+def test_remove_when_none_is_noop():
+    sc = Scanner(papers(1)); sc.start()
+    assert sc.feed("remove") == []
+
+
+def test_open_does_not_change_state():
+    sc = Scanner(papers(1)); sc.start()
+    fx = sc.feed("open")
+    assert fx == [Open(sc.current.entry_id)]
+    assert sc.states[0] == "none"
+
+
+# -- Scanner: pause ------------------------------------------------------------
+
+def test_pause_gates_actions_and_resume():
+    sc = Scanner(papers(1)); sc.start()
+    fx = sc.feed("pause")
+    assert sc.paused and fx == [Log({"type": "pause"}), PauseTimer()]
+    fx = sc.feed("save")            # gated while paused
+    assert fx == [] and sc.states[0] == "none"
+    fx = sc.feed("pause")           # space resumes
+    assert not sc.paused and fx == [Log({"type": "resume"}), ResumeTimer()]
+
+
+def test_quit_works_while_paused():
+    sc = Scanner(papers(1)); sc.start()
+    sc.feed("pause")
+    fx = sc.feed("quit")
+    assert sc.done and fx == [Log({"type": "end"})]
+
+
+# -- Scanner: navigation -------------------------------------------------------
+
+def test_forward_arrives_and_logs_new_paper():
+    sc = Scanner(papers(2)); sc.start()
+    fx = sc.feed("forward")
+    assert sc.index == 1
+    assert MarkRead(sc.xid) in fx
+    assert Log({"type": "view", "xid": sc.xid}) in fx
+    assert sc.nseen == 1
+
+
+def test_forward_past_end_ends_session():
+    sc = Scanner(papers(1)); sc.start()
+    fx = sc.feed("forward")
+    assert sc.done and fx == [Log({"type": "end"})]
+
+
+def test_back_at_start_is_noop():
+    sc = Scanner(papers(2)); sc.start()
+    assert sc.feed("back") == [] and sc.index == 0
+
+
+def test_revisit_does_not_relog_readlog():
+    sc = Scanner(papers(2)); sc.start()    # arrive p0 (readlog)
+    sc.feed("forward")                      # arrive p1 (readlog)
+    fx = sc.feed("back")                    # back to p0: view but NOT readlog
+    assert Log({"type": "view", "xid": sc.xid}) in fx
+    assert not any(isinstance(e, MarkRead) for e in fx)
+
+
+def test_quit_ends():
+    sc = Scanner(papers(1)); sc.start()
+    fx = sc.feed("quit")
+    assert sc.done and fx == [Log({"type": "end"})]
+
+
+def test_unknown_command_ignored():
+    sc = Scanner(papers(1)); sc.start()
+    assert sc.feed("frobnicate") == []
+
+
+# -- render --------------------------------------------------------------------
+
+def test_render_shows_state_glyph():
+    sc = Scanner(papers(1)); sc.start()
+    assert "Title 1" in render_frame(sc, 0.0)
+    assert "☆" not in render_frame(sc, 0.0) and "★" not in render_frame(sc, 0.0)
+    sc.feed("save")
+    assert "☆" in render_frame(sc, 0.0)
+    sc.feed("down")  # -> downloaded
+    assert "★" in render_frame(sc, 0.0)
+
+
+# -- effects: end-to-end through the session sinks (I/O mocked) ----------------
+
+def test_effects_run_end_to_end(tmp_path, monkeypatch):
+    # Drive the Scanner directly and run each emitted effect via its run(session)
+    # method with I/O mocked -- exercises Scanner + effects + the Session managers
+    # (Scanlog/Readlog/Downloads/Stopwatch) end to end, including the pause/resume
+    # timer effects. (The key-read half is covered by the KEY_TO_COMMAND tests.)
+    scanlog_path = tmp_path / "scanlog.jsonl"
+    readlog_path = tmp_path / "readlog.txt"
+    dl = tmp_path / "dl"
+
+    monkeypatch.setattr(util, "copy_to_clipboard", lambda text: False)
+    monkeypatch.setattr(util, "open_url", lambda url: False)
+    monkeypatch.setattr(util, "download_paper",
+                        lambda paper_id, path: open(path, "w").write("PDF"))
+
+    sc = Scanner(papers(1))
+    session = Session(
+        scanlog=Scanlog(str(scanlog_path)),
+        readlog=Readlog(str(readlog_path)),
+        downloads=Downloads(str(dl)),
+        stopwatch=Stopwatch(),
+    )
+
+    def run(effects):
+        for effect in effects:
+            effect.run(session)
+
+    run(sc.start())
+    for command in ["save", "remove", "pause", "pause", "download", "remove", "quit"]:
+        run(sc.feed(command))
+
+    events = [json.loads(line)["type"] for line in scanlog_path.open()]
+    assert events == [
+        "start", "view", "save", "remove", "pause", "resume",
+        "download", "remove", "end",
+    ]
+    assert list(dl.rglob("*.pdf")) == []          # PDF downloaded then deleted
+    assert list(util.load_readlog(str(readlog_path))[0]) == ["2601.00001"]  # logged once
+
+
+# -- session sinks: Readlog / Downloads ----------------------------------------
 
 def test_readlog_appends_grouped_across_dates(tmp_path):
     path = str(tmp_path / "readlog.txt")

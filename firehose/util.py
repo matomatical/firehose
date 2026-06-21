@@ -52,10 +52,10 @@ def data_paths(
 #
 # arxiv.txt (the paper cache) and readlog.txt (the seen-index) are plain text,
 # one paper per logical entry, sorted by date. To keep them small while staying
-# greppable and hand-editable, entries sharing a date are grouped under a single
-# date header rather than repeating the date on every line:
+# greppable and hand-editable, entries sharing a date are grouped under a
+# single date header rather than repeating the date on every line:
 #
-#     2026-03-04:          <- date header: every bare id below it has this date
+#     2026-03-04:    <- date header: every bare id below it has this date
 #     2603.00012
 #     2603.00077
 #     2025-08-12:
@@ -70,7 +70,7 @@ def load_cache(
 ) -> tuple[dict[str, datetime.date], datetime.date]:
     """
     Load the {id: date} paper cache plus the "latest datestamp" watermark from
-    the first line. Ids are returned bare (the OAI prefix lives only in harvest).
+    the first line.
     """
     with open(path, 'r') as f:
         # 1st line has form "latest datestamp: DATESTAMP"
@@ -88,9 +88,9 @@ def load_readlog(
 ) -> tuple[dict[str, datetime.date], datetime.date | None]:
     """
     Load the seen-index as a {id: date} dict, plus the date of its last entry
-    (None if empty). That date seeds the live appender's open group, so resuming
-    a same-day session continues that group without re-reading the file. No OAI
-    prefix handling is needed here (readlog ids are stored bare).
+    (None if empty). That date seeds the live appender's open group, so
+    resuming a same-day session continues that group without re-reading the
+    file.
     """
     readlog = {}
     last_date = None
@@ -102,20 +102,18 @@ def load_readlog(
 
 
 def _parse_dated_lines(lines):
-    """Yield (id, date) per entry from an iterable of lines. Each entry is a bare
-    "<id>" dated by the nearest "<YYYY-MM-DD>:" header above it; blank lines are
-    skipped, and each header date is constructed once and shared across the ids
-    beneath it.
     """
-    cur = None
+    Yield (id, date) per entry from an iterable of lines. Each entry is a bare
+    "<id>" dated by the nearest "<YYYY-MM-DD>:" header above it; each header
+    date is constructed once and shared across the ids beneath it.
+    """
+    current_date = None
     for line in lines:
         line = line.rstrip("\n")
-        if not line:
-            continue
         if line.endswith(":"):
-            cur = to_date(line[:-1])
+            current_date = to_date(line[:-1])
         else:
-            yield line, cur
+            yield line, current_date
 
 
 # # # 
@@ -138,14 +136,15 @@ def save_cache(
 
 
 def _write_grouped(f, dated_ids):
-    """Write (date, id) pairs -- which MUST be sorted by date -- in grouped form:
-    a "<date>:" header whenever the date changes, then each id on its own line.
     """
-    cur = None
+    Write (date, id) pairs, sorted by date, in grouped form: a "<date>:" header
+    whenever the date changes, then each id on its own line.
+    """
+    current_date = None
     for date, xid in dated_ids:
-        if date != cur:
+        if date != current_date:
             f.write(f"{to_datestamp(date)}:\n")
-            cur = date
+            current_date = date
         f.write(f"{xid}\n")
 
 
@@ -155,12 +154,12 @@ def append_readlog(
     date: datetime.date,
     open_date: datetime.date | None,
 ) -> datetime.date:
-    """Append `xid` to the seen-index in grouped form, writing a "<date>:" header
+    """
+    Append `xid` to the seen-index in grouped form, writing a "<date>:" header
     first iff `open_date` (the date currently governing the end of the file)
     differs from `date`. Returns `date` as the new open_date to thread into the
-    next call; seed the first call with the readlog's last date from load_readlog
-    (None for a fresh file). Keeps readlog compact at write time, so no periodic
-    re-grouping is needed.
+    next call; seed the first call with the readlog's last date from
+    load_readlog (None for a fresh file).
     """
     with open(path, 'a') as f:
         if open_date != date:
@@ -176,8 +175,7 @@ def append_readlog(
 def log_event(path: str, event: dict) -> None:
     """
     Append one event as a JSON line to the scan log at `path`, stamped with the
-    current local time under the key "t". Each call is a self-contained append,
-    so the log is written in real time and survives a crash mid-session.
+    current local time under the key "t".
     """
     record = {"t": datetime.datetime.now().isoformat(), **event}
     parent = os.path.dirname(path)
@@ -214,8 +212,7 @@ def to_name(result) -> str:
     * .published.year: the year of submission
     * .title: string title
 
-    This method combines these into a string name for the paper in my preferred
-    format.
+    This method combines these into a string name for the paper.
     """
     # author
     # 1:  LastName

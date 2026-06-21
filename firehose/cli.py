@@ -10,11 +10,10 @@ def cli():
     tyro.extras.subcommand_cli_from_dict({
         # harvest
         'harvest': firehose.harvest.harvest,
-        # print arXiv category catalog
-        'classes': firehose.classes.classes,
         # sample
         'sample': firehose.sample.sample,
-        'nsample': firehose.sample.nsample,
+        # print arXiv category catalog
+        'classes': firehose.classes.classes,
         # visualising readlog and cache
         'calendar': firehose.vis.reading_calendar,
         'linear': firehose.vis.linear,
