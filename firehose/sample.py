@@ -39,9 +39,11 @@ def select_papers(
       * randomise=True:  `n` candidates drawn at random via `rng`.
 
     `offset`, when given, first narrows to the last `offset` candidates (paging
-    back through older unread papers). Pure: no I/O, clock, or global RNG — pass
-    a seeded `rng` for deterministic sampling in tests.
+    back through older unread papers); `n <= 0` selects nothing. Pure: no I/O,
+    clock, or global RNG — pass a seeded `rng` for deterministic sampling in tests.
     """
+    if n <= 0:
+        return []
     unread = [(xid, date) for xid, date in cache.items() if xid not in read]
     if modern:
         unread = [(xid, date) for xid, date in unread if date > cutoff]

@@ -92,11 +92,9 @@ def test_select_papers_randomise_is_deterministic_with_seeded_rng():
     assert out1 == out2   # same seed -> same draw
 
 
-def test_select_papers_n_zero_returns_everything_reversed():
-    # NB: documents a current sharp edge. In the default branch n=0 hits
-    # unread[-0:] == unread[:], i.e. ALL candidates (reversed) rather than none.
-    # Flagged to Matthew as a latent bug; pinned here so any fix is a deliberate,
-    # visible change to this assertion.
-    cache = {f"p{i}": _d(i) for i in range(1, 4)}   # p1,p2,p3
-    out = select_papers(cache, set(), n=0)
-    assert [xid for xid, _ in out] == ["p3", "p2", "p1"]
+def test_select_papers_n_zero_or_negative_returns_empty():
+    # Guards the unread[-0:] == unread[:] trap: without the n<=0 short-circuit the
+    # default branch would return *all* candidates for n=0 (and slice oddly for n<0).
+    cache = {f"p{i}": _d(i) for i in range(1, 4)}
+    assert select_papers(cache, set(), n=0) == []
+    assert select_papers(cache, set(), n=-1) == []
