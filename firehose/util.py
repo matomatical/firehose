@@ -24,6 +24,11 @@ DEFAULT_DOWNLOAD_DIR = "~/storage/library/readings"
 # arXiv's OAI-PMH endpoint, shared by `harvest` and `classes`.
 OAI_API_URL = "https://oaipmh.arxiv.org/oai"
 
+# Papers dated on or before this are "old" and dropped by sample's default
+# (modern) scan; roughly when Matthew started using firehose. Overridable via
+# [scan].modern_cutoff in config.toml; this is the fallback when it is unset.
+DEFAULT_MODERN_CUTOFF = datetime.date(2025, 4, 15)
+
 
 def load_config(path: str) -> dict:
     """Parse the TOML config file."""
@@ -37,6 +42,14 @@ def subscribed_classes(config: dict) -> set[str]:
     parser drops them automatically.
     """
     return set(config["arxiv"]["categories"])
+
+
+def modern_cutoff(config: dict) -> datetime.date:
+    """The [scan].modern_cutoff date (papers on/before it are dropped by sample's
+    default scan). TOML parses a bare YYYY-MM-DD as a date; falls back to
+    DEFAULT_MODERN_CUTOFF when the key (or [scan] table) is absent.
+    """
+    return config.get("scan", {}).get("modern_cutoff", DEFAULT_MODERN_CUTOFF)
 
 
 def resolve_paths(

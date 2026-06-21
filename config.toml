@@ -10,6 +10,12 @@ data = "data"
 # single run with --download-dir.
 downloads = "~/storage/library/readings"
 
+[scan]
+# Papers submitted on or before this date are treated as "old" and dropped by
+# the default `sample` scan (`sample --no-modern` keeps them); roughly when I
+# started using firehose. Written as a bare date -- TOML parses it as a date.
+modern_cutoff = 2025-04-15
+
 [arxiv]
 # arXiv categories are OAI "setSpecs" (colon form, e.g. cs:cs:AI). firehose
 # harvest monitors new papers belonging to any uncommented categories in the

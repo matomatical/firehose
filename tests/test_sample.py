@@ -38,7 +38,7 @@ def test_key_to_command_unknown_is_none():
 # -- select_papers: filtering + ordering ---------------------------------------
 
 def _d(day: int) -> datetime.date:
-    """A date in May 2025 (after MODERN_CUTOFF), parameterised by day-of-month."""
+    """A date in May 2025 (after the modern cutoff), parameterised by day-of-month."""
     return datetime.date(2025, 5, day)
 
 

@@ -12,11 +12,6 @@ from firehose import vis
 from firehose import scanner as scn
 
 
-# Papers dated on or before this are treated as "old" and dropped by default
-# (sample --no-modern keeps them); roughly when Matthew started using firehose.
-MODERN_CUTOFF = datetime.date(2025, 4, 15)
-
-
 def select_papers(
     cache: dict[str, datetime.date],
     read: set[str],
@@ -26,7 +21,7 @@ def select_papers(
     randomise: bool = False,
     offset: int | None = None,
     modern: bool = True,
-    cutoff: datetime.date = MODERN_CUTOFF,
+    cutoff: datetime.date = util.DEFAULT_MODERN_CUTOFF,
     rng=random,
 ) -> list[tuple[str, datetime.date]]:
     """Choose which (xid, date) papers to scan from the cache.
@@ -73,7 +68,8 @@ def sample(
     """
     Download and present abstracts for a batch of papers.
     """
-    paths = util.paths(config_path, data_dir=data_dir, download_dir=download_dir)
+    config = util.load_config(config_path)
+    paths = util.resolve_paths(config, data_dir=data_dir, download_dir=download_dir)
 
     # load cached headers with overlapping classes
     print("loading papers from disk...")
@@ -100,6 +96,7 @@ def sample(
         randomise=randomise,
         offset=offset,
         modern=modern,
+        cutoff=util.modern_cutoff(config),
     )
     print(f"selected {len(toread)} papers to scan")
 

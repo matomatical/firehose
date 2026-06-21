@@ -1,3 +1,4 @@
+import datetime
 import os
 import textwrap
 
@@ -69,3 +70,22 @@ def test_resolve_paths_defaults_when_no_paths_section(tmp_path):
     p = util.resolve_paths(util.load_config(path))
     assert p.data_dir == util.DEFAULT_DATA_DIR
     assert p.downloads == os.path.expanduser(util.DEFAULT_DOWNLOAD_DIR)
+
+
+def test_modern_cutoff_from_config(tmp_path):
+    # a bare YYYY-MM-DD in TOML parses straight to a datetime.date
+    path = _write(tmp_path, """
+        [arxiv]
+        categories = []
+        [scan]
+        modern_cutoff = 2025-04-15
+    """)
+    assert util.modern_cutoff(util.load_config(path)) == datetime.date(2025, 4, 15)
+
+
+def test_modern_cutoff_defaults_when_absent(tmp_path):
+    path = _write(tmp_path, """
+        [arxiv]
+        categories = []
+    """)
+    assert util.modern_cutoff(util.load_config(path)) == util.DEFAULT_MODERN_CUTOFF
