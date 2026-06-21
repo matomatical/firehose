@@ -22,25 +22,26 @@ def sample(
     modern: bool = True,
     query_batch_size: int = 100,
     query_wait_time: float = 3.5,
-    cache_path: str = os.path.join(util.DATA_DIR, "arxiv.txt"),
-    readlog_path: str = os.path.join(util.DATA_DIR, "readlog.txt"),
-    scanlog_path: str = os.path.join(util.DATA_DIR, "scanlog.jsonl"),
-    download_dir: str = "~/storage/library/readings",
+    config_path: str = util.CONFIG_PATH,
+    data_dir: str | None = None,
+    download_dir: str | None = None,
 ):
     """
     Download and present abstracts for a batch of papers.
     """
+    paths = util.paths(config_path, data_dir=data_dir, download_dir=download_dir)
+
     # load cached headers with overlapping classes
     print("loading papers from disk...")
     cache, _ = util.load_cache(
-        path=cache_path,
+        path=paths.cache,
         strip_prefix=True,
     )
     print(f"loaded {len(cache)} papers")
 
     # load read papers from read log
     print("checking which have already been read...")
-    readlog = util.load_readlog(path=readlog_path)
+    readlog = util.load_readlog(path=paths.readlog)
     read = set(readlog)
     print(f"loaded {len(read)} already-read papers")
 
@@ -124,9 +125,9 @@ def sample(
         return
     _run_session(
         papers,
-        scanlog_path=scanlog_path,
-        readlog_path=readlog_path,
-        download_dir=download_dir,
+        scanlog_path=paths.scanlog,
+        readlog_path=paths.readlog,
+        download_dir=paths.downloads,
     )
     print("done!")
 
@@ -275,8 +276,8 @@ def nsample(
     modern: bool = True,
     query_batch_size: int = 100,
     query_wait_time: float = 3.5,
-    cache_path: str = os.path.join(util.DATA_DIR, "arxiv.txt"),
-    readlog_path: str = os.path.join(util.DATA_DIR, "readlog.txt"),
+    config_path: str = util.CONFIG_PATH,
+    data_dir: str | None = None,
 ):
     """
     Run 'sample' without downloading (sample --no-query).
@@ -290,6 +291,6 @@ def nsample(
         modern=modern,
         query_batch_size=query_batch_size,
         query_wait_time=query_wait_time,
-        cache_path=cache_path,
-        readlog_path=readlog_path,
+        config_path=config_path,
+        data_dir=data_dir,
     )

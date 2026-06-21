@@ -1,7 +1,6 @@
 import calendar
 import collections
 import datetime
-import os
 import time
 import typing
 
@@ -10,16 +9,13 @@ import matthewplotlib as mp
 from firehose import util
 
 
-READLOG_PATH = os.path.join(util.DATA_DIR, "readlog.txt")
-CACHE_PATH = os.path.join(util.DATA_DIR, "arxiv.txt")
-
-
 def all_submitted_dates(
-    cache_path: str = CACHE_PATH,
+    config_path: str = util.CONFIG_PATH,
+    data_dir: str | None = None,
     save_as: str | None = None,
 ):
     print("loading all submit dates from paper cache...")
-    cache, _ = util.load_cache(path=cache_path)
+    cache, _ = util.load_cache(path=util.paths(config_path, data_dir=data_dir).cache)
     print(f"loaded {len(cache)} papers")
 
     print("printing calendar...")
@@ -33,10 +29,11 @@ def all_submitted_dates(
 
 
 def all_submitted_years(
-    cache_path: str = CACHE_PATH,
+    config_path: str = util.CONFIG_PATH,
+    data_dir: str | None = None,
 ):
     print("loading all submit dates from paper cache...")
-    cache, _ = util.load_cache(path=cache_path)
+    cache, _ = util.load_cache(path=util.paths(config_path, data_dir=data_dir).cache)
     print(f"loaded {len(cache)} papers")
     
     years = collections.Counter([date.year for date in cache.values()])
@@ -47,10 +44,11 @@ def all_submitted_years(
 
 
 def all_submitted_months(
-    cache_path: str = CACHE_PATH,
+    config_path: str = util.CONFIG_PATH,
+    data_dir: str | None = None,
 ):
     print("loading all submit dates from paper cache...")
-    cache, _ = util.load_cache(path=cache_path)
+    cache, _ = util.load_cache(path=util.paths(config_path, data_dir=data_dir).cache)
     print(f"loaded {len(cache)} papers")
     
     year_months = collections.Counter([
@@ -68,17 +66,18 @@ def reading_calendar(
         "submit-date",
         "proportion",
     ] = "read-date",
-    readlog_path: str = READLOG_PATH,
-    cache_path: str = CACHE_PATH,
+    config_path: str = util.CONFIG_PATH,
+    data_dir: str | None = None,
     save_as: str | None = None,
 ):
+    paths = util.paths(config_path, data_dir=data_dir)
     print("loading read log...")
-    readlog = util.load_readlog(path=readlog_path)
+    readlog = util.load_readlog(path=paths.readlog)
     print(f"loaded {len(readlog)} already-read papers")
 
     if mode == "submit-date" or mode == "proportion":
         print("loading their submitted dates from paper cache...")
-        cache, _ = util.load_cache(path=cache_path, strip_prefix=True)
+        cache, _ = util.load_cache(path=paths.cache, strip_prefix=True)
         print(f"resolved {len(cache)} read papers")
     
     print("printing calendar...")
@@ -106,18 +105,19 @@ def reading_calendar(
 
 
 def linear(
-    readlog_path: str = READLOG_PATH,
-    cache_path: str = CACHE_PATH,
+    config_path: str = util.CONFIG_PATH,
+    data_dir: str | None = None,
     batch_size: int = 100,
     save_as: str | None = None,
 ):
+    paths = util.paths(config_path, data_dir=data_dir)
     print("loading all submitted ids from paper cache...")
-    cache, _ = util.load_cache(path=cache_path, strip_prefix=True)
+    cache, _ = util.load_cache(path=paths.cache, strip_prefix=True)
     all_xids = list(cache.keys())
     print(f"found {len(all_xids)} papers")
 
     print("loading read log")
-    readlog = util.load_readlog(path=readlog_path)
+    readlog = util.load_readlog(path=paths.readlog)
     read_xids = list(readlog.keys())
     print(f"found {len(read_xids)} read papers")
 
@@ -137,11 +137,12 @@ def linear(
 def hilbert(
     live: bool = False,
     size: int | None = None,
-    readlog_path: str = READLOG_PATH,
-    cache_path: str = CACHE_PATH,
+    config_path: str = util.CONFIG_PATH,
+    data_dir: str | None = None,
 ):
+    paths = util.paths(config_path, data_dir=data_dir)
     print("loading all submitted ids from paper cache...")
-    cache, _ = util.load_cache(path=cache_path, strip_prefix=True)
+    cache, _ = util.load_cache(path=paths.cache, strip_prefix=True)
     all_xids = {xid: i for i, xid in enumerate(cache.keys())}
     print(f"found {len(all_xids)} papers")
 
@@ -150,7 +151,7 @@ def hilbert(
     rendered = False
     
     print("starting read loop...")
-    with open(readlog_path, 'r') as f:
+    with open(paths.readlog, 'r') as f:
         while True:
             # read titles added so far
             new_titles = False

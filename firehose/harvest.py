@@ -13,21 +13,21 @@ API_URL = "https://oaipmh.arxiv.org/oai"
 MAX_RPS = 1/3
 BATCH_SIZE = 3_500
 # BATCH_SIZE = 20_000 # for headers only
-CACHE_PATH = os.path.join(util.DATA_DIR, "arxiv.txt")
-CONFIG_PATH = "config.toml"
 
 
 def harvest(
     expected_total: int | None = None,
     num_batches: int | None = None,
-    config_path: str = CONFIG_PATH,
-    cache_path: str = CACHE_PATH,
+    config_path: str = util.CONFIG_PATH,
+    data_dir: str | None = None,
 ):
     """
     Download new arXiv ids in selected classes.
     """
-    # load subscribed classes from config
-    my_classes = util.load_my_classes(path=config_path)
+    # load subscribed classes and resolve data paths from config
+    config = util.load_config(config_path)
+    my_classes = util.subscribed_classes(config)
+    cache_path = util.resolve_paths(config, data_dir=data_dir).cache
 
     # configure client
     sickle = Sickle(API_URL)

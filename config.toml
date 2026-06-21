@@ -1,6 +1,15 @@
 # firehose configuration
 #
 
+[paths]
+# Where firehose keeps its data files (arxiv.txt, readlog.txt, savelog.txt,
+# scanlog.jsonl). A relative path resolves from the directory firehose runs in.
+# Override for a single run with --data-dir.
+data = "data"
+# Where grabbed PDFs are saved (kept outside the repo here). Override for a
+# single run with --download-dir.
+downloads = "~/storage/library/readings"
+
 [arxiv]
 # arXiv categories are OAI "setSpecs" (colon form, e.g. cs:cs:AI). firehose
 # harvest monitors new papers belonging to any uncommented categories in the

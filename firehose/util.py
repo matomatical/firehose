@@ -7,28 +7,72 @@ import shutil
 import subprocess
 import sys
 import tomllib
+import types
 
 import requests
 import tqdm
 
 
-# All generated/logged data files live under this directory (resolved relative
-# to the directory firehose is run from). config.toml stays at the top level as
-# configuration, not data.
-DATA_DIR = "data"
+# firehose reads its settings from a TOML config (config.toml at the top level
+# by default; override with --config-path). config.toml is configuration, not
+# data, so it stays at the top level rather than under the data directory.
+# Path precedence is:  CLI argument  >  [paths] in the config  >  default below.
+CONFIG_PATH = "config.toml"
+DEFAULT_DATA_DIR = "data"
+DEFAULT_DOWNLOAD_DIR = "~/storage/library/readings"
 
 
-def load_my_classes(
-    path: str,
-) -> set[str]:
-    """Subscribed arXiv setSpecs: the [arxiv].categories list in config.toml.
-
-    Commented-out entries (the available-but-not-followed catalog) are TOML
-    comments, so the parser drops them automatically.
-    """
+def load_config(path: str) -> dict:
+    """Parse the TOML config file."""
     with open(path, "rb") as f:
-        config = tomllib.load(f)
+        return tomllib.load(f)
+
+
+def subscribed_classes(config: dict) -> set[str]:
+    """Subscribed arXiv setSpecs: the [arxiv].categories list. Commented-out
+    entries (the available-but-not-followed catalog) are TOML comments, so the
+    parser drops them automatically.
+    """
     return set(config["arxiv"]["categories"])
+
+
+def resolve_paths(
+    config: dict,
+    *,
+    data_dir: str | None = None,
+    download_dir: str | None = None,
+) -> types.SimpleNamespace:
+    """Resolve the data-file and download paths, with optional per-run
+    overrides. Precedence for each: the explicit argument > [paths] in the
+    config > the built-in default.
+    """
+    paths = config.get("paths", {})
+    data_dir = os.path.expanduser(data_dir or paths.get("data", DEFAULT_DATA_DIR))
+    download_dir = os.path.expanduser(
+        download_dir or paths.get("downloads", DEFAULT_DOWNLOAD_DIR)
+    )
+    return types.SimpleNamespace(
+        data_dir=data_dir,
+        cache=os.path.join(data_dir, "arxiv.txt"),
+        readlog=os.path.join(data_dir, "readlog.txt"),
+        savelog=os.path.join(data_dir, "savelog.txt"),
+        scanlog=os.path.join(data_dir, "scanlog.jsonl"),
+        downloads=download_dir,
+    )
+
+
+def paths(
+    config_path: str = CONFIG_PATH,
+    *,
+    data_dir: str | None = None,
+    download_dir: str | None = None,
+) -> types.SimpleNamespace:
+    """Convenience: load the config and resolve paths in one call."""
+    return resolve_paths(
+        load_config(config_path),
+        data_dir=data_dir,
+        download_dir=download_dir,
+    )
 
 
 def load_cache(
