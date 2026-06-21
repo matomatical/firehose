@@ -23,8 +23,6 @@ dependencies = [
     "readchar",
     "pathvalidate",
     "requests",
-    # for catchup
-    "beautifulsoup4",
     # # types
     # "mypy",
     # "types-tqdm",
