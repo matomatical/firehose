@@ -205,4 +205,4 @@ def test_run_session_integration(tmp_path, monkeypatch):
     events = [json.loads(line)["type"] for line in scanlog.open()]
     assert events == ["start", "view", "save", "remove", "download", "remove", "end"]
     assert list(dl.rglob("*.pdf")) == []          # PDF downloaded then deleted
-    assert readlog.read_text().split()[0] == "2601.00001"
+    assert list(util.load_readlog(str(readlog))) == ["2601.00001"]  # logged once

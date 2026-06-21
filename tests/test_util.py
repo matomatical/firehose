@@ -140,6 +140,41 @@ def test_load_readlog_reads_grouped(tmp_path):
     }
 
 
+# -- grouped readlog appender (live scan path) ---------------------------------
+
+def test_last_header_date(tmp_path):
+    path = str(tmp_path / "readlog.txt")
+    assert util.last_header_date(path) is None                 # missing file
+    open(path, "w").write("2504.1 2025-04-23\n2504.2 2025-04-24\n")
+    assert util.last_header_date(path) is None                 # only legacy flat
+    open(path, "w").write("2025-04-23:\n2504.1\n2025-05-01:\n2504.2\n")
+    assert util.last_header_date(path) == datetime.date(2025, 5, 1)
+    open(path, "a").write("2504.3 2025-05-02\n")               # flat line after
+    assert util.last_header_date(path) == datetime.date(2025, 5, 1)  # last header
+
+
+def test_append_readlog_writes_grouped_and_threads_open_date(tmp_path):
+    path = str(tmp_path / "readlog.txt")
+    d1, d2 = datetime.date(2026, 6, 20), datetime.date(2026, 6, 21)
+    open_date = util.last_header_date(path)                    # None (no file)
+    open_date = util.append_readlog(path, "a", d1, open_date)  # header d1 + a
+    open_date = util.append_readlog(path, "b", d1, open_date)  # just b (same day)
+    open_date = util.append_readlog(path, "c", d2, open_date)  # header d2 + c
+    assert open_date == d2
+    assert open(path).read() == "2026-06-20:\na\nb\n2026-06-21:\nc\n"
+    assert util.load_readlog(path) == {"a": d1, "b": d1, "c": d2}
+
+
+def test_append_readlog_resumes_same_day_group(tmp_path):
+    # seeding open_date from last_header_date lets a second same-day session
+    # continue the day's group instead of writing a duplicate header
+    path = str(tmp_path / "readlog.txt")
+    d = datetime.date(2026, 6, 21)
+    util.append_readlog(path, "a", d, None)                    # header d + a
+    util.append_readlog(path, "b", d, util.last_header_date(path))  # just b
+    assert open(path).read() == "2026-06-21:\na\nb\n"
+
+
 # -- date helpers --------------------------------------------------------------
 
 def test_to_date_parses_iso():

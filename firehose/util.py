@@ -186,6 +186,42 @@ def load_readlog(
     return readlog
 
 
+def last_header_date(path: str) -> datetime.date | None:
+    """The date of the last "<date>:" group header in a grouped data file, or
+    None if there is none (missing/empty file, or only legacy flat lines). Seeds
+    the live readlog appender so it knows whether a fresh header is needed.
+    """
+    last = None
+    try:
+        with open(path, 'r') as f:
+            for line in f:
+                line = line.rstrip("\n")
+                if line.endswith(":"):
+                    last = line[:-1]
+    except FileNotFoundError:
+        return None
+    return to_date(last) if last else None
+
+
+def append_readlog(
+    path: str,
+    xid: str,
+    date: datetime.date,
+    open_date: datetime.date | None,
+) -> datetime.date:
+    """Append `xid` to the seen-index in grouped form, writing a "<date>:" header
+    first iff `open_date` (the date currently governing the end of the file)
+    differs from `date`. Returns `date` as the new open_date to thread into the
+    next call; seed the first call with last_header_date(path). Keeps readlog
+    compact at write time, so no periodic re-grouping is needed.
+    """
+    with open(path, 'a') as f:
+        if open_date != date:
+            f.write(f"{to_datestamp(date)}:\n")
+        f.write(f"{xid}\n")
+    return date
+
+
 def to_date(datestamp: str) -> datetime.date:
     # robust method
     # return datetime.datetime.strptime(datestamp, '%Y-%m-%d').date()

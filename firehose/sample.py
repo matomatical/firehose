@@ -234,7 +234,7 @@ def _timing_line(stopwatch: Stopwatch, nseen: int, paused: bool) -> str:
     return line
 
 
-def _execute(effect, *, scanlog_path, readlog_path, download_dir, pdf_paths):
+def _execute(effect, *, scanlog_path, readlog_path, download_dir, pdf_paths, readlog_state):
     """Carry out one declarative effect emitted by the Scanner."""
     if isinstance(effect, scn.Log):
         util.log_event(scanlog_path, effect.event)
@@ -247,8 +247,12 @@ def _execute(effect, *, scanlog_path, readlog_path, download_dir, pdf_paths):
             print(f"no opener available; url: {effect.url}")
 
     elif isinstance(effect, scn.Readlog):
-        with open(readlog_path, 'a') as f:
-            f.write(f"{effect.xid} {datetime.date.today().strftime('%Y-%m-%d')}\n")
+        # append in grouped form (a "<date>:" header only when the day changes),
+        # threading the open group date through readlog_state so the file stays
+        # compact without a later re-grouping pass.
+        readlog_state["open_date"] = util.append_readlog(
+            readlog_path, effect.xid, datetime.date.today(), readlog_state["open_date"]
+        )
 
     elif isinstance(effect, scn.Download):
         dirpath = os.path.join(
@@ -274,6 +278,9 @@ def _run_session(papers, *, scanlog_path, readlog_path, download_dir):
     """Drive the interactive scan: render, read a key, run the Scanner's effects."""
     sc = scn.Scanner(papers)
     pdf_paths = {}
+    # seed the appender with the file's current trailing group so resuming a scan
+    # on the same day continues that day's group instead of opening a new header.
+    readlog_state = {"open_date": util.last_header_date(readlog_path)}
 
     def run(effects):
         for effect in effects:
@@ -283,6 +290,7 @@ def _run_session(papers, *, scanlog_path, readlog_path, download_dir):
                 readlog_path=readlog_path,
                 download_dir=download_dir,
                 pdf_paths=pdf_paths,
+                readlog_state=readlog_state,
             )
 
     run(sc.start())
