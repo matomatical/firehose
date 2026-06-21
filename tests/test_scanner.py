@@ -184,7 +184,7 @@ def test_run_session_integration(tmp_path, monkeypatch):
     from firehose import util
 
     scanlog = tmp_path / "scanlog.jsonl"
-    readlog = tmp_path / "rdlog.txt"
+    readlog = tmp_path / "readlog.txt"
     dl = tmp_path / "dl"
 
     monkeypatch.setattr(util, "copy_to_clipboard", lambda text: False)

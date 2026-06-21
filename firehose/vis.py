@@ -10,7 +10,7 @@ import matthewplotlib as mp
 from firehose import util
 
 
-READLOG_PATH = os.path.join(util.DATA_DIR, "rdlog.txt")
+READLOG_PATH = os.path.join(util.DATA_DIR, "readlog.txt")
 CACHE_PATH = os.path.join(util.DATA_DIR, "arxiv.txt")
 
 

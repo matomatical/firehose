@@ -36,7 +36,7 @@ class Open:
 
 @dataclass
 class Readlog:
-    """Append this paper id to the read log (rdlog.txt)."""
+    """Append this paper id to the read log (readlog.txt)."""
     xid: str
 
 @dataclass

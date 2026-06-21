@@ -23,7 +23,7 @@ def sample(
     query_batch_size: int = 100,
     query_wait_time: float = 3.5,
     cache_path: str = os.path.join(util.DATA_DIR, "arxiv.txt"),
-    readlog_path: str = os.path.join(util.DATA_DIR, "rdlog.txt"),
+    readlog_path: str = os.path.join(util.DATA_DIR, "readlog.txt"),
     scanlog_path: str = os.path.join(util.DATA_DIR, "scanlog.jsonl"),
     download_dir: str = "~/storage/library/readings",
 ):
@@ -276,7 +276,7 @@ def nsample(
     query_batch_size: int = 100,
     query_wait_time: float = 3.5,
     cache_path: str = os.path.join(util.DATA_DIR, "arxiv.txt"),
-    readlog_path: str = os.path.join(util.DATA_DIR, "rdlog.txt"),
+    readlog_path: str = os.path.join(util.DATA_DIR, "readlog.txt"),
 ):
     """
     Run 'sample' without downloading (sample --no-query).
