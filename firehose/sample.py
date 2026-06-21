@@ -12,6 +12,48 @@ from firehose import vis
 from firehose import scanner as scn
 
 
+# Papers dated on or before this are treated as "old" and dropped by default
+# (sample --no-modern keeps them); roughly when Matthew started using firehose.
+MODERN_CUTOFF = datetime.date(2025, 4, 15)
+
+
+def select_papers(
+    cache: dict[str, datetime.date],
+    read: set[str],
+    *,
+    n: int,
+    backwards: bool = False,
+    randomise: bool = False,
+    offset: int | None = None,
+    modern: bool = True,
+    cutoff: datetime.date = MODERN_CUTOFF,
+    rng=random,
+) -> list[tuple[str, datetime.date]]:
+    """Choose which (xid, date) papers to scan from the cache.
+
+    Drops already-read ids, then (when `modern`) papers dated on or before
+    `cutoff`, then takes a window of size `n`:
+
+      * default:        the last `n` candidates, reversed (newest first);
+      * backwards=True:  the first `n` candidates, in cache order (oldest first);
+      * randomise=True:  `n` candidates drawn at random via `rng`.
+
+    `offset`, when given, first narrows to the last `offset` candidates (paging
+    back through older unread papers). Pure: no I/O, clock, or global RNG — pass
+    a seeded `rng` for deterministic sampling in tests.
+    """
+    unread = [(xid, date) for xid, date in cache.items() if xid not in read]
+    if modern:
+        unread = [(xid, date) for xid, date in unread if date > cutoff]
+    if offset is not None:
+        unread = unread[-offset:]
+    if backwards:
+        return unread[:n]
+    if randomise:
+        return rng.sample(unread, n)
+    return unread[-n:][::-1]
+
+
 def sample(
     n: int = 100,
     /,
@@ -45,30 +87,19 @@ def sample(
     read = set(readlog)
     print(f"loaded {len(read)} already-read papers")
 
-    # filtering the lists
-    print("removing these from the list...")
-    unread = [(xid, date) for xid, date in cache.items() if xid not in read]
-    print(f"remaining {len(unread)} papers to scan")
-
-    # filtering the list for date
-    if modern:
-        print("removing old papers from the list...")
-        cutoff = datetime.date(2025, 4, 15)
-        unread = [(xid, date) for xid, date in unread if date > cutoff]
-        print(f"remaining {len(unread)} papers to scan")
-
-    # sampling papers
-    print("sampling new papers up to the budget...")
-    if offset is not None:
-        unread = unread[-offset:]
-    if backwards:
-        toread = unread[:n]
-    elif randomise:
-        toread = random.sample(unread, n)
-    else:
-        toread = unread[-n:]
-        toread = toread[::-1]
-    print(f"sampled {len(toread)} papers")
+    # select which papers to scan (ordering / offset / modern rules live in
+    # select_papers, which is pure and unit-tested)
+    print("selecting papers to scan...")
+    toread = select_papers(
+        cache,
+        read,
+        n=n,
+        backwards=backwards,
+        randomise=randomise,
+        offset=offset,
+        modern=modern,
+    )
+    print(f"selected {len(toread)} papers to scan")
 
     print("visualising on calendar...")
     toread_dates = [date for xid, date in toread]

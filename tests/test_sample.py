@@ -1,13 +1,16 @@
 """
-Tests for firehose.sample's pure helpers. _key_to_command maps a raw keypress to
-a semantic Scanner command; it is a pure lookup over readchar constants and needs
-no terminal. (The Scanner side of the input layer — commands -> effects — is
-covered in test_scanner.py; this covers keys -> commands.)
+Tests for firehose.sample's pure helpers: _key_to_command (keys -> Scanner
+commands) and select_papers (which papers to scan, given the cache + readlog).
+Both are pure — no terminal, network, or clock. (The Scanner side of the input
+layer, commands -> effects, is covered in test_scanner.py.)
 """
+
+import datetime
+import random
 
 import readchar
 
-from firehose.sample import _key_to_command
+from firehose.sample import _key_to_command, select_papers
 
 
 def test_key_to_command_letters():
@@ -30,3 +33,70 @@ def test_key_to_command_special_keys():
 def test_key_to_command_unknown_is_none():
     assert _key_to_command("z") is None
     assert _key_to_command("1") is None
+
+
+# -- select_papers: filtering + ordering ---------------------------------------
+
+def _d(day: int) -> datetime.date:
+    """A date in May 2025 (after MODERN_CUTOFF), parameterised by day-of-month."""
+    return datetime.date(2025, 5, day)
+
+
+def test_select_papers_default_takes_last_n_newest_first():
+    cache = {f"p{i}": _d(i) for i in range(1, 6)}   # p1..p5 in cache order
+    out = select_papers(cache, read=set(), n=2)
+    # last two in cache order are p4, p5; returned reversed (newest first)
+    assert [xid for xid, _ in out] == ["p5", "p4"]
+
+
+def test_select_papers_backwards_takes_first_n_in_order():
+    cache = {f"p{i}": _d(i) for i in range(1, 6)}
+    out = select_papers(cache, read=set(), n=2, backwards=True)
+    assert [xid for xid, _ in out] == ["p1", "p2"]
+
+
+def test_select_papers_excludes_read():
+    cache = {f"p{i}": _d(i) for i in range(1, 6)}
+    out = select_papers(cache, read={"p4", "p5"}, n=2)
+    # candidates are p1,p2,p3; last two reversed -> p3, p2
+    assert [xid for xid, _ in out] == ["p3", "p2"]
+
+
+def test_select_papers_modern_filters_on_or_before_cutoff():
+    cache = {
+        "older": datetime.date(2024, 1, 1),     # dropped
+        "cutoff": datetime.date(2025, 4, 15),   # == cutoff, dropped (kept iff strictly after)
+        "new1": datetime.date(2025, 4, 16),     # kept
+        "new2": datetime.date(2025, 5, 1),      # kept
+    }
+    assert {xid for xid, _ in select_papers(cache, set(), n=10)} == {"new1", "new2"}
+    # modern=False keeps the old ones
+    assert {xid for xid, _ in select_papers(cache, set(), n=10, modern=False)} == {
+        "older", "cutoff", "new1", "new2",
+    }
+
+
+def test_select_papers_offset_narrows_window_before_selecting():
+    cache = {f"p{i}": _d(i) for i in range(1, 6)}
+    # offset=3 -> last three candidates [p3,p4,p5]; backwards then takes first two
+    out = select_papers(cache, set(), n=2, offset=3, backwards=True)
+    assert [xid for xid, _ in out] == ["p3", "p4"]
+
+
+def test_select_papers_randomise_is_deterministic_with_seeded_rng():
+    cache = {f"p{i}": _d(i) for i in range(1, 6)}
+    out1 = select_papers(cache, set(), n=3, randomise=True, rng=random.Random(0))
+    out2 = select_papers(cache, set(), n=3, randomise=True, rng=random.Random(0))
+    assert len(out1) == 3
+    assert {xid for xid, _ in out1} <= {f"p{i}" for i in range(1, 6)}
+    assert out1 == out2   # same seed -> same draw
+
+
+def test_select_papers_n_zero_returns_everything_reversed():
+    # NB: documents a current sharp edge. In the default branch n=0 hits
+    # unread[-0:] == unread[:], i.e. ALL candidates (reversed) rather than none.
+    # Flagged to Matthew as a latent bug; pinned here so any fix is a deliberate,
+    # visible change to this assertion.
+    cache = {f"p{i}": _d(i) for i in range(1, 4)}   # p1,p2,p3
+    out = select_papers(cache, set(), n=0)
+    assert [xid for xid, _ in out] == ["p3", "p2", "p1"]
