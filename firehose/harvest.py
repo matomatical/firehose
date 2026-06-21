@@ -14,20 +14,20 @@ MAX_RPS = 1/3
 BATCH_SIZE = 3_500
 # BATCH_SIZE = 20_000 # for headers only
 CACHE_PATH = os.path.join(util.DATA_DIR, "arxiv.txt")
-CLASSES_PATH = "classes.txt"
+CONFIG_PATH = "config.toml"
 
 
 def harvest(
     expected_total: int | None = None,
     num_batches: int | None = None,
-    classes_path: str = CLASSES_PATH,
+    config_path: str = CONFIG_PATH,
     cache_path: str = CACHE_PATH,
 ):
     """
     Download new arXiv ids in selected classes.
     """
-    # load classes
-    my_classes = util.load_my_classes(path=classes_path)
+    # load subscribed classes from config
+    my_classes = util.load_my_classes(path=config_path)
 
     # configure client
     sickle = Sickle(API_URL)

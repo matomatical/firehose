@@ -6,13 +6,14 @@ import re
 import shutil
 import subprocess
 import sys
+import tomllib
 
 import requests
 import tqdm
 
 
 # All generated/logged data files live under this directory (resolved relative
-# to the directory firehose is run from). classes.txt stays at the top level as
+# to the directory firehose is run from). config.toml stays at the top level as
 # configuration, not data.
 DATA_DIR = "data"
 
@@ -20,13 +21,14 @@ DATA_DIR = "data"
 def load_my_classes(
     path: str,
 ) -> set[str]:
-    my_classes = set()
-    with open(path) as f:
-        for line in f:
-            class_, star, _ = line.split(maxsplit=2)
-            if star == "*":
-                my_classes.add(class_)
-    return my_classes
+    """Subscribed arXiv setSpecs: the [arxiv].categories list in config.toml.
+
+    Commented-out entries (the available-but-not-followed catalog) are TOML
+    comments, so the parser drops them automatically.
+    """
+    with open(path, "rb") as f:
+        config = tomllib.load(f)
+    return set(config["arxiv"]["categories"])
 
 
 def load_cache(

@@ -8,25 +8,17 @@ API_URL = "https://oaipmh.arxiv.org/oai"
 
 def classes():
     """
-    Download full list of classes, or check for new classes.
+    Print arXiv's full category catalog (OAI setSpecs and names), sorted.
+
+    arXiv's taxonomy is effectively frozen, so config.toml ships a static copy.
+    Run this on the rare occasion you want to look up a setSpec or check whether
+    arXiv has added a category, then edit config.toml by hand.
     """
     sickle = Sickle(API_URL)
-
-    # existing configured sets
-    with open('classes.txt') as f:
-        configured_sets = { line.split(maxsplit=1)[0] for line in f }
-
-    # sets according to API
-    api_listed_sets = { s.setSpec: s.setName for s in sickle.ListSets() }
-
-    # new sets
-    new_sets = set(api_listed_sets) - configured_sets
-
-    # output
-    print(len(new_sets), "new classes", file=sys.stderr)
-    for set_id in new_sets:
-        set_name = api_listed_sets[set_id]
-        print(f"{set_id:32s} # {set_name}")
-
-    sys.exit(len(new_sets))
+    # dict dedupes the duplicate setSpecs arXiv's ListSets returns (e.g. gr-qc)
+    catalog = sorted({s.setSpec: s.setName for s in sickle.ListSets()}.items())
+    width = max((len(spec) for spec, _ in catalog), default=0)
+    for spec, name in catalog:
+        print(f"{spec:{width}}  # {name}")
+    print(f"{len(catalog)} categories", file=sys.stderr)
 

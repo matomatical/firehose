@@ -10,7 +10,7 @@ def cli():
     tyro.extras.subcommand_cli_from_dict({
         # harvest
         'harvest': firehose.harvest.harvest,
-        # check classes
+        # print arXiv category catalog
         'classes': firehose.classes.classes,
         # sample
         'sample': firehose.sample.sample,
