@@ -12,45 +12,6 @@ from firehose import vis
 from firehose import scanner as scn
 
 
-def select_papers(
-    cache: dict[str, datetime.date],
-    read: set[str],
-    *,
-    n: int,
-    backwards: bool = False,
-    randomise: bool = False,
-    offset: int | None = None,
-    modern: bool = True,
-    cutoff: datetime.date = util.DEFAULT_MODERN_CUTOFF,
-    rng=random,
-) -> list[tuple[str, datetime.date]]:
-    """Choose which (xid, date) papers to scan from the cache.
-
-    Drops already-read ids, then (when `modern`) papers dated on or before
-    `cutoff`, then takes a window of size `n`:
-
-      * default:        the last `n` candidates, reversed (newest first);
-      * backwards=True:  the first `n` candidates, in cache order (oldest first);
-      * randomise=True:  `n` candidates drawn at random via `rng`.
-
-    `offset`, when given, first narrows to the last `offset` candidates (paging
-    back through older unread papers); `n <= 0` selects nothing. Pure: no I/O,
-    clock, or global RNG — pass a seeded `rng` for deterministic sampling in tests.
-    """
-    if n <= 0:
-        return []
-    unread = [(xid, date) for xid, date in cache.items() if xid not in read]
-    if modern:
-        unread = [(xid, date) for xid, date in unread if date > cutoff]
-    if offset is not None:
-        unread = unread[-offset:]
-    if backwards:
-        return unread[:n]
-    if randomise:
-        return rng.sample(unread, n)
-    return unread[-n:][::-1]
-
-
 def sample(
     n: int = 100,
     /,
@@ -85,8 +46,7 @@ def sample(
     read = set(readlog)
     print(f"loaded {len(read)} already-read papers")
 
-    # select which papers to scan (ordering / offset / modern rules live in
-    # select_papers, which is pure and unit-tested)
+    # select which papers to scan
     print("selecting papers to scan...")
     toread = select_papers(
         cache,
@@ -105,7 +65,7 @@ def sample(
     print(vis.vis_dates(toread_dates))
 
     if not query:
-        print("exiting...")
+        print("exiting.")
         return
 
     # run the query
@@ -160,6 +120,45 @@ def sample(
         download_dir=paths.downloads,
     )
     print("done!")
+
+
+def select_papers(
+    cache: dict[str, datetime.date],
+    read: set[str],
+    *,
+    n: int,
+    backwards: bool = False,
+    randomise: bool = False,
+    offset: int | None = None,
+    modern: bool = True,
+    cutoff: datetime.date = util.DEFAULT_MODERN_CUTOFF,
+    rng=random,
+) -> list[tuple[str, datetime.date]]:
+    """Choose which (xid, date) papers to scan from the cache.
+
+    Drops already-read ids, then (when `modern`) papers dated on or before
+    `cutoff`, then takes a window of size `n`:
+
+      * default:        the last `n` candidates, reversed (newest first);
+      * backwards=True:  the first `n` candidates, in cache order (oldest first);
+      * randomise=True:  `n` candidates drawn at random via `rng`.
+
+    `offset`, when given, first narrows to the last `offset` candidates (paging
+    back through older unread papers); `n <= 0` selects nothing. Pure: no I/O,
+    clock, or global RNG — pass a seeded `rng` for deterministic sampling in tests.
+    """
+    if n <= 0:
+        return []
+    unread = [(xid, date) for xid, date in cache.items() if xid not in read]
+    if modern:
+        unread = [(xid, date) for xid, date in unread if date > cutoff]
+    if offset is not None:
+        unread = unread[-offset:]
+    if backwards:
+        return unread[:n]
+    if randomise:
+        return rng.sample(unread, n)
+    return unread[-n:][::-1]
 
 
 def _paper_from_result(r) -> scn.Paper:
