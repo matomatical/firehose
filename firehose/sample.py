@@ -43,7 +43,7 @@ def sample(
 
     # load read papers from read log
     print("checking which have already been read...")
-    readlog = util.load_readlog(path=paths.readlog)
+    readlog, last_read_date = util.load_readlog(path=paths.readlog)
     read = set(readlog)
     print(f"loaded {len(read)} already-read papers")
 
@@ -118,6 +118,7 @@ def sample(
         scanlog_path=paths.scanlog,
         readlog_path=paths.readlog,
         download_dir=download_dir,
+        open_date=last_read_date,
     )
     print("done!")
 
@@ -235,14 +236,15 @@ def _timing_line(stopwatch: Stopwatch, nseen: int, paused: bool) -> str:
 
 class Readlog:
     """The seen-index for a scan session: appends each viewed id in grouped form
-    (a "<date>:" header only when the day changes), seeding its open group from
-    the file so a same-day resume continues that group rather than duplicating a
-    header. Keeps readlog compact at write time -- no later re-grouping pass.
+    (a "<date>:" header only when the day changes). Seeded with the readlog's
+    last date (from load_readlog) so a same-day resume continues that group
+    rather than duplicating a header. Keeps readlog compact at write time -- no
+    later re-grouping pass.
     """
 
-    def __init__(self, path):
+    def __init__(self, path, open_date=None):
         self.path = path
-        self._open_date = util.last_header_date(path)
+        self._open_date = open_date
 
     def log(self, xid, date):
         self._open_date = util.append_readlog(self.path, xid, date, self._open_date)
@@ -297,10 +299,10 @@ def _execute(effect, *, scanlog_path, readlog, downloads):
         downloads.delete(effect.xid)
 
 
-def _run_session(papers, *, scanlog_path, readlog_path, download_dir):
+def _run_session(papers, *, scanlog_path, readlog_path, download_dir, open_date=None):
     """Drive the interactive scan: render, read a key, run the Scanner's effects."""
     sc = scn.Scanner(papers)
-    readlog = Readlog(readlog_path)
+    readlog = Readlog(readlog_path, open_date)
     downloads = Downloads(download_dir)
 
     def run(effects):

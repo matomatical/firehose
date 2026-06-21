@@ -65,12 +65,9 @@ def data_paths(
 # sample.Readlog) both emit this grouped form.
 
 
-# FLAG: have the feeling that load cache and load readlog utilities should both
-# be more similar:
-# (1) we could move OAI adding/stripping entirely internally to harvester.
-# (2) load readlog probably does want to return a tuple with the latest date
-#     for initialising the readlog writer, does this bring it in line with
-#     that part of the cache loading function?
+# FLAG: load_cache and load_readlog could be more similar -- move the OAI prefix
+# add/strip entirely into harvest (the only consumer of the prefix) and drop
+# load_cache's strip_prefix flag.
 
 
 def load_cache(
@@ -94,16 +91,20 @@ def load_cache(
 
 def load_readlog(
     path: str,
-) -> dict[str, datetime.date]:
+) -> tuple[dict[str, datetime.date], datetime.date | None]:
     """
-    Load a list of dated paper ids from readlog, and there is no need for
-    stripping OAI prefix here.
+    Load the seen-index as a {id: date} dict, plus the date of its last entry
+    (None if empty). That date seeds the live appender's open group, so resuming
+    a same-day session continues that group without re-reading the file. No OAI
+    prefix handling is needed here (readlog ids are stored bare).
     """
     readlog = {}
+    last_date = None
     with open(path, 'r') as f:
         for xid, date in _parse_dated_lines(f):
             readlog[xid] = date
-    return readlog
+            last_date = date
+    return readlog, last_date
 
 
 def _parse_dated_lines(lines):
@@ -158,26 +159,6 @@ def _write_grouped(f, dated_ids):
         f.write(f"{xid}\n")
 
 
-# FLAG: This seems bad, we should have already read the file by now and caught
-# the latest date when we did.
-
-def last_header_date(path: str) -> datetime.date | None:
-    """The date of the last "<date>:" group header in a grouped data file, or
-    None if there is none (missing/empty file, or no "<date>:" headers). Seeds
-    the live readlog appender so it knows whether a fresh header is needed.
-    """
-    last = None
-    try:
-        with open(path, 'r') as f:
-            for line in f:
-                line = line.rstrip("\n")
-                if line.endswith(":"):
-                    last = line[:-1]
-    except FileNotFoundError:
-        return None
-    return to_date(last) if last else None
-
-
 def append_readlog(
     path: str,
     xid: str,
@@ -187,8 +168,9 @@ def append_readlog(
     """Append `xid` to the seen-index in grouped form, writing a "<date>:" header
     first iff `open_date` (the date currently governing the end of the file)
     differs from `date`. Returns `date` as the new open_date to thread into the
-    next call; seed the first call with last_header_date(path). Keeps readlog
-    compact at write time, so no periodic re-grouping is needed.
+    next call; seed the first call with the readlog's last date from load_readlog
+    (None for a fresh file). Keeps readlog compact at write time, so no periodic
+    re-grouping is needed.
     """
     with open(path, 'a') as f:
         if open_date != date:

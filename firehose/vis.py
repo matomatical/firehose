@@ -76,7 +76,7 @@ def reading_calendar(
     config = util.load_config(config_path)
     paths = util.data_paths(config, data_dir=data_dir)
     print("loading read log...")
-    readlog = util.load_readlog(path=paths.readlog)
+    readlog, _ = util.load_readlog(path=paths.readlog)
     print(f"loaded {len(readlog)} already-read papers")
 
     if mode == "submit-date" or mode == "proportion":
@@ -122,7 +122,7 @@ def linear(
     print(f"found {len(all_xids)} papers")
 
     print("loading read log")
-    readlog = util.load_readlog(path=paths.readlog)
+    readlog, _ = util.load_readlog(path=paths.readlog)
     read_xids = list(readlog.keys())
     print(f"found {len(read_xids)} read papers")
 

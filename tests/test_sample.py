@@ -128,12 +128,13 @@ def test_readlog_appends_grouped_across_dates(tmp_path):
 
 
 def test_readlog_resume_continues_open_group(tmp_path):
-    # a fresh Readlog on an existing file seeds its open group from the last
-    # header, so a same-day resume continues it instead of duplicating the header
+    # a Readlog seeded with the readlog's last date (from load_readlog) continues
+    # that day's group on resume instead of duplicating the header
     path = str(tmp_path / "readlog.txt")
     d = datetime.date(2026, 6, 21)
     Readlog(path).log("a", d)
-    Readlog(path).log("b", d)          # new instance, same day
+    _, open_date = util.load_readlog(path)
+    Readlog(path, open_date).log("b", d)   # resumed session, seeded from the file
     assert open(path).read() == "2026-06-21:\na\nb\n"
 
 
