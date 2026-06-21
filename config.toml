@@ -6,9 +6,10 @@
 # A relative path resolves from the directory firehose runs in.
 # Override for a single run with --data-dir.
 data = "data"
-# Where grabbed PDFs are saved (kept outside the repo here). Override for a
-# single run with --download-dir.
-downloads = "~/storage/library/readings"
+# Where grabbed PDFs are saved (gitignored; filed under <YYYY-MM>/ subdirs).
+# A relative path resolves from the directory firehose runs in; ~ is expanded.
+# Override for a single run with --download-dir.
+downloads = "downloads"
 
 [scan]
 # Papers submitted on or before this date are treated as "old" and dropped by

@@ -36,9 +36,12 @@ def data_paths(
     data_dir: str | None = None,
 ) -> types.SimpleNamespace:
     """
-    Paths for data, with optional override.
+    Paths for data, with optional override. Ensures the data directory exists
+    (it is gitignored, so it's absent on a fresh clone) so the first harvest or
+    scan can write into it.
     """
     data_dir = os.path.expanduser(data_dir or config["paths"]["data"])
+    os.makedirs(data_dir, exist_ok=True)
     return types.SimpleNamespace(
         data_dir=data_dir,
         cache=os.path.join(data_dir, "arxiv.txt"),

@@ -217,6 +217,12 @@ hand-editable:
 Grouping ids under a shared date header, rather than repeating the date on every
 line, roughly halves these files and noticeably speeds up loading.
 
+`data/` is gitignored, so your reading history never lands in the code repo, and
+it's created automatically on first run. It's worth backing up, though: the index
+takes hours to harvest and the read log is irreplaceable. I keep my `data/` under
+its own private git repo — the grouped, append-mostly format is designed to keep
+git diffs small — but any backup will do.
+
 
 Tests
 -----
