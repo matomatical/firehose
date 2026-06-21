@@ -31,18 +31,23 @@ def test_save_cache_writes_expected_on_disk_format(tmp_path):
     path = str(tmp_path / "arxiv.txt")
     cache = {
         _prefixed("2508.00002"): datetime.date(2025, 8, 12),
+        _prefixed("2508.00001"): datetime.date(2025, 8, 12),  # shares a date
         _prefixed("cs/9301111"): datetime.date(1990, 1, 1),
     }
     util.save_cache(path, datetime.date(2026, 3, 5), cache)
 
     lines = open(path).read().splitlines()
-    # one header line, then "<bare-id> <YYYY-MM-DD>" sorted by (date, id), prefix
-    # stripped. This is the real format of data/arxiv.txt (the README's extra
-    # "number of papers:" header line is stale: the code neither writes nor reads it).
+    # the "latest datestamp" header, then ids grouped under a "<date>:" header,
+    # sorted by (date, id), prefix stripped. Ids sharing a date sit under one
+    # header rather than repeating the date on every line. (The README's extra
+    # "number of papers:" line is stale: the code neither writes nor reads it.)
     assert lines == [
         "latest datestamp: 2026-03-05",
-        "cs/9301111 1990-01-01",
-        "2508.00002 2025-08-12",
+        "1990-01-01:",
+        "cs/9301111",
+        "2025-08-12:",
+        "2508.00001",
+        "2508.00002",
     ]
 
 
@@ -50,6 +55,7 @@ def test_cache_round_trip_preserves_entries_and_latest_date(tmp_path):
     path = str(tmp_path / "arxiv.txt")
     cache = {
         _prefixed("2508.00002"): datetime.date(2025, 8, 12),
+        _prefixed("2508.00001"): datetime.date(2025, 8, 12),  # exercise a group
         _prefixed("cs/9301111"): datetime.date(1990, 1, 1),
     }
     latest = datetime.date(2026, 3, 5)
@@ -63,6 +69,27 @@ def test_cache_round_trip_preserves_entries_and_latest_date(tmp_path):
     # strip_prefix=True yields the bare ids that sample/vis consume
     bare, _ = util.load_cache(path, strip_prefix=True)
     assert bare == {
+        "2508.00002": datetime.date(2025, 8, 12),
+        "2508.00001": datetime.date(2025, 8, 12),
+        "cs/9301111": datetime.date(1990, 1, 1),
+    }
+
+
+def test_load_cache_reads_grouped_and_legacy_flat(tmp_path):
+    # The loader accepts a grouped block AND a legacy flat "<id> <date>" line in
+    # the same file (the grouped form is a strict superset of the old format).
+    path = str(tmp_path / "arxiv.txt")
+    open(path, "w").write(
+        "latest datestamp: 2026-03-05\n"
+        "2025-08-12:\n"          # date header -> the two bare ids below share it
+        "2508.00001\n"
+        "2508.00002\n"
+        "cs/9301111 1990-01-01\n"  # legacy flat self-dated line still works
+    )
+    bare, latest = util.load_cache(path, strip_prefix=True)
+    assert latest == datetime.date(2026, 3, 5)
+    assert bare == {
+        "2508.00001": datetime.date(2025, 8, 12),
         "2508.00002": datetime.date(2025, 8, 12),
         "cs/9301111": datetime.date(1990, 1, 1),
     }
@@ -94,6 +121,23 @@ def test_load_readlog_duplicate_id_keeps_last(tmp_path):
     path = tmp_path / "readlog.txt"
     path.write_text("2504.15284 2025-04-23\n2504.15284 2025-05-01\n")
     assert util.load_readlog(str(path)) == {"2504.15284": datetime.date(2025, 5, 1)}
+
+
+def test_load_readlog_reads_grouped(tmp_path):
+    # the grouped form: a "<date>:" header dates the bare ids beneath it. An id
+    # appearing under a later group still takes the later date (dict keeps last).
+    path = tmp_path / "readlog.txt"
+    path.write_text(
+        "2025-04-23:\n"
+        "2504.15284\n"
+        "2504.15286\n"
+        "2025-05-01:\n"
+        "2504.15284\n"
+    )
+    assert util.load_readlog(str(path)) == {
+        "2504.15284": datetime.date(2025, 5, 1),
+        "2504.15286": datetime.date(2025, 4, 23),
+    }
 
 
 # -- date helpers --------------------------------------------------------------

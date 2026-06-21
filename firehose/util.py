@@ -78,23 +78,71 @@ def paths(
     )
 
 
+# -- on-disk data format -------------------------------------------------------
+#
+# arxiv.txt (the paper cache) and readlog.txt (the seen-index) are plain text,
+# one paper per logical entry, sorted by date. To keep them small while staying
+# greppable and hand-editable, entries sharing a date are grouped under a single
+# date header rather than repeating the date on every line:
+#
+#     2026-03-04:          <- date header: every bare id below it has this date
+#     2603.00012
+#     2603.00077
+#     2025-08-12:
+#     2508.00002
+#
+# The grouped form is a strict superset of the older flat form: a line may be
+# either a bare "<id>" (dated by the header above it) or a self-contained
+# "<id> <YYYY-MM-DD>". The loader accepts both, so old files and grouped files
+# read identically, and readlog's live append path keeps writing the flat,
+# self-dated form (each append is independent and crash-safe). save_cache and the
+# one-off migration emit the compact grouped form.
+
+def _parse_dated_lines(lines):
+    """Yield (id, date) per entry from an iterable of lines, accepting both the
+    grouped form (a "<YYYY-MM-DD>:" header followed by bare "<id>" lines) and
+    the flat self-dated form ("<id> <YYYY-MM-DD>"). Blank lines are skipped.
+    Each grouped date is constructed once and shared across the group's ids.
+    """
+    cur = None
+    for line in lines:
+        line = line.rstrip("\n")
+        if not line:
+            continue
+        if line.endswith(":"):
+            cur = to_date(line[:-1])
+        elif " " in line:
+            xid, datestamp = line.split()
+            yield xid, to_date(datestamp)
+        else:
+            yield line, cur
+
+
+def _write_grouped(f, dated_ids):
+    """Write (date, id) pairs -- which MUST be sorted by date -- in grouped form:
+    a "<date>:" header whenever the date changes, then each id on its own line.
+    """
+    cur = None
+    for date, xid in dated_ids:
+        if date != cur:
+            f.write(f"{to_datestamp(date)}:\n")
+            cur = date
+        f.write(f"{xid}\n")
+
+
 def load_cache(
     path: str,
     strip_prefix: bool = False,
 ) -> tuple[dict[str, datetime.date], datetime.date]:
-    cache = {}
     with open(path, 'r') as f:
         # 1st line has form "latest datestamp: DATESTAMP"
         latest_date = to_date(next(f).strip().split(": ")[-1])
-        # subsequent lines are papers
+        # subsequent lines are papers (grouped or flat; see format note above)
         lines = f.read().splitlines()
-    # process these
-    for line in tqdm.tqdm(lines, ncols=80):
-        xid, datestamp = line.split()
-        cache[xid] = to_date(datestamp)
-    # optionally add prefixes
-    if not strip_prefix:
-        cache = {"oai:arXiv.org:" + x: d for x, d in cache.items()}
+    prefix = "" if strip_prefix else "oai:arXiv.org:"
+    cache = {}
+    for xid, date in _parse_dated_lines(tqdm.tqdm(lines, ncols=80)):
+        cache[prefix + xid] = date
     return cache, latest_date
 
 
@@ -106,17 +154,14 @@ def save_cache(
     """Write the paper cache to disk.
 
     Keys are expected to carry the OAI prefix ("oai:arXiv.org:"), which is
-    stripped on the way out, so ids are stored bare and sorted by (date, id).
+    stripped on the way out, so ids are stored bare and grouped by date.
     load_cache re-adds the prefix by default (strip_prefix=False).
     """
-    sorted_cache = sorted([(date, xid) for xid, date in cache.items()])
+    plen = len("oai:arXiv.org:")
+    sorted_cache = sorted((date, xid[plen:]) for xid, date in cache.items())
     with open(path, 'w') as f:
         f.write(f"latest datestamp: {to_datestamp(latest_date)}\n")
-        for date, xid in tqdm.tqdm(sorted_cache, ncols=80):
-            f.write("{} {}\n".format(
-                xid[len("oai:arXiv.org:"):],
-                to_datestamp(date),
-            ))
+        _write_grouped(f, tqdm.tqdm(sorted_cache, ncols=80))
 
 
 def load_readlog(
@@ -124,9 +169,8 @@ def load_readlog(
 ) -> dict[str, datetime.date]:
     readlog = {}
     with open(path, 'r') as f:
-        for line in f:
-            xid, datestamp = line.strip().split()
-            readlog[xid] = to_date(datestamp)
+        for xid, date in _parse_dated_lines(f):
+            readlog[xid] = date
     return readlog
 
 

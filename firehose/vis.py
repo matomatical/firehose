@@ -156,8 +156,14 @@ def hilbert(
             # read titles added so far
             new_titles = False
             for line in f:
+                line = line.strip()
+                # skip blanks and "<date>:" group headers; an entry is a bare
+                # "<id>" or a flat "<id> <date>", so the id is token 0 either way
+                # (see the data-format note in util.py).
+                if not line or line.endswith(":"):
+                    continue
                 new_titles = True
-                xid, _ = line.strip().split()
+                xid = line.split()[0]
                 if xid in all_xids:
                     read_vec[all_xids[xid]] = True
 
