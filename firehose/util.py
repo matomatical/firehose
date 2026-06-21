@@ -21,6 +21,9 @@ CONFIG_PATH = "config.toml"
 DEFAULT_DATA_DIR = "data"
 DEFAULT_DOWNLOAD_DIR = "~/storage/library/readings"
 
+# arXiv's OAI-PMH endpoint, shared by `harvest` and `classes`.
+OAI_API_URL = "https://oaipmh.arxiv.org/oai"
+
 
 def load_config(path: str) -> dict:
     """Parse the TOML config file."""
@@ -99,8 +102,13 @@ def save_cache(
     path: str,
     latest_date: datetime.date,
     cache: dict[str, datetime.date],
-    has_prefix: bool = False,
 ):
+    """Write the paper cache to disk.
+
+    Keys are expected to carry the OAI prefix ("oai:arXiv.org:"), which is
+    stripped on the way out, so ids are stored bare and sorted by (date, id).
+    load_cache re-adds the prefix by default (strip_prefix=False).
+    """
     sorted_cache = sorted([(date, xid) for xid, date in cache.items()])
     with open(path, 'w') as f:
         f.write(f"latest datestamp: {to_datestamp(latest_date)}\n")
@@ -180,7 +188,7 @@ def download_paper(paper_id: str, path: str):
         unit_divisor=1024,
         ncols=80,
     )
-    # open file (TODO: CHECK IT DOES NOT EXIST?)
+    # open file (the caller ensures the path does not already exist)
     with open(path, 'wb') as file:
         # stream the data into the file
         for data in response.iter_content(chunk_size=1024):

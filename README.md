@@ -6,12 +6,11 @@ Install with `pip install -e .`.
 Harvest
 -------
 
-`firehose-harvest` creates a file, `data/arxiv.txt`, which is a list of all articles
+`firehose harvest` creates a file, `data/arxiv.txt`, which is a list of all articles
 within a configurable list of classes, along with their submission datestamps.
 The format is something like this:
 
 ```
-number of papers: 749208
 latest datestamp: 2025-08-13
 cs/9301111 1990-01-01
 cs/9301113 1991-08-01
@@ -39,7 +38,7 @@ few seconds to connect and download the new paper IDs.
 Sample
 ------
 
-`firehose` displays the latest 100 unread papers.
+`firehose sample` displays the latest 100 unread papers.
 
 TODO: Document.
 
@@ -47,6 +46,7 @@ TODO: Document.
 Read log
 --------
 
-`firehose-readlog` displays various visualisations showing progress.
+`firehose calendar` (also `linear`, `hilbert`, `days`, `months`, `years`) displays
+various visualisations of reading progress.
 
 TODO: Document.

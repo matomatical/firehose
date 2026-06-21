@@ -19,9 +19,9 @@ from firehose import util
 # exact on-disk format and the prefix handling.
 #
 # NB: save_cache writes ids with the OAI prefix ("oai:arXiv.org:") stripped, and
-# load_cache(strip_prefix=False) re-adds it. save_cache therefore *assumes* its
-# input keys carry that prefix (it slices a fixed 14 chars off every id); harvest
-# always holds prefixed keys, which is the supported usage exercised here.
+# load_cache(strip_prefix=False) re-adds it. save_cache assumes its input keys
+# carry that prefix (harvest always holds prefixed keys), which is the usage
+# exercised here.
 
 def _prefixed(xid: str) -> str:
     return "oai:arXiv.org:" + xid
@@ -33,7 +33,7 @@ def test_save_cache_writes_expected_on_disk_format(tmp_path):
         _prefixed("2508.00002"): datetime.date(2025, 8, 12),
         _prefixed("cs/9301111"): datetime.date(1990, 1, 1),
     }
-    util.save_cache(path, datetime.date(2026, 3, 5), cache, has_prefix=True)
+    util.save_cache(path, datetime.date(2026, 3, 5), cache)
 
     lines = open(path).read().splitlines()
     # one header line, then "<bare-id> <YYYY-MM-DD>" sorted by (date, id), prefix
@@ -53,7 +53,7 @@ def test_cache_round_trip_preserves_entries_and_latest_date(tmp_path):
         _prefixed("cs/9301111"): datetime.date(1990, 1, 1),
     }
     latest = datetime.date(2026, 3, 5)
-    util.save_cache(path, latest, cache, has_prefix=True)
+    util.save_cache(path, latest, cache)
 
     # default load re-adds the prefix -> identity round-trip
     loaded, loaded_latest = util.load_cache(path)
@@ -71,7 +71,7 @@ def test_cache_round_trip_preserves_entries_and_latest_date(tmp_path):
 def test_cache_round_trip_empty(tmp_path):
     path = str(tmp_path / "arxiv.txt")
     latest = datetime.date(2026, 3, 5)
-    util.save_cache(path, latest, {}, has_prefix=True)
+    util.save_cache(path, latest, {})
     assert open(path).read() == "latest datestamp: 2026-03-05\n"
     loaded, loaded_latest = util.load_cache(path)
     assert loaded == {}

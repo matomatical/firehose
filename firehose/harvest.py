@@ -9,7 +9,6 @@ from firehose import util
 from firehose import vis
 
 
-API_URL = "https://oaipmh.arxiv.org/oai"
 MAX_RPS = 1/3
 BATCH_SIZE = 3_500
 # BATCH_SIZE = 20_000 # for headers only
@@ -30,7 +29,7 @@ def harvest(
     cache_path = util.resolve_paths(config, data_dir=data_dir).cache
 
     # configure client
-    sickle = Sickle(API_URL)
+    sickle = Sickle(util.OAI_API_URL)
 
     # identifying archive
     print("identifying archive...")
@@ -95,7 +94,6 @@ def harvest(
             for record in batch:
                 xid = record.header.identifier
                 submit_date = util.to_date(record.metadata['date'][0])
-                _updated_date = util.to_date(record.metadata['date'][-1])
                 latest_date = util.to_date(record.header.datestamp)
                 classes = set(record.header.setSpecs)
                 if not (classes & my_classes):
@@ -130,7 +128,6 @@ def harvest(
         path=cache_path,
         latest_date=latest_date,
         cache=cache,
-        has_prefix=True,
     )
 
     print("done.")

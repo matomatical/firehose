@@ -2,8 +2,7 @@ import sys
 
 from sickle import Sickle
 
-
-API_URL = "https://oaipmh.arxiv.org/oai"
+from firehose import util
 
 
 def classes():
@@ -14,7 +13,7 @@ def classes():
     Run this on the rare occasion you want to look up a setSpec or check whether
     arXiv has added a category, then edit config.toml by hand.
     """
-    sickle = Sickle(API_URL)
+    sickle = Sickle(util.OAI_API_URL)
     # dict dedupes the duplicate setSpecs arXiv's ListSets returns (e.g. gr-qc)
     catalog = sorted({s.setSpec: s.setName for s in sickle.ListSets()}.items())
     width = max((len(spec) for spec, _ in catalog), default=0)
