@@ -71,7 +71,6 @@ def resolve_paths(
         data_dir=data_dir,
         cache=os.path.join(data_dir, "arxiv.txt"),
         readlog=os.path.join(data_dir, "readlog.txt"),
-        savelog=os.path.join(data_dir, "savelog.txt"),
         scanlog=os.path.join(data_dir, "scanlog.jsonl"),
         downloads=download_dir,
     )

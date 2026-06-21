@@ -2,8 +2,8 @@
 #
 
 [paths]
-# Where firehose keeps its data files (arxiv.txt, readlog.txt, savelog.txt,
-# scanlog.jsonl). A relative path resolves from the directory firehose runs in.
+# Where firehose keeps its data files (arxiv.txt, readlog.txt, scanlog.jsonl).
+# A relative path resolves from the directory firehose runs in.
 # Override for a single run with --data-dir.
 data = "data"
 # Where grabbed PDFs are saved (kept outside the repo here). Override for a
