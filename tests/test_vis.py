@@ -13,8 +13,8 @@ from firehose import util, vis
 def test_all_submitted_years_runs_against_tmp_cache(tmp_path, capsys):
     (tmp_path / "config.toml").write_text('[paths]\ndata = "unused"\n')
     cache = {
-        "oai:arXiv.org:2501.00001": datetime.date(2025, 1, 1),
-        "oai:arXiv.org:2601.00002": datetime.date(2026, 1, 2),
+        "2501.00001": datetime.date(2025, 1, 1),
+        "2601.00002": datetime.date(2026, 1, 2),
     }
     util.save_cache(str(tmp_path / "arxiv.txt"), datetime.date(2026, 1, 2), cache)
 

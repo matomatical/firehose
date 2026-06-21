@@ -44,31 +44,23 @@ def test_data_paths_expands_user():
 
 # The cache (data/arxiv.txt) is firehose's master paper index, so a save/load
 # regression is the highest-consequence bug in the repo. These tests pin the
-# exact on-disk format and the prefix handling.
-#
-# NB: save_cache writes ids with the OAI prefix ("oai:arXiv.org:") stripped, and
-# load_cache(strip_prefix=False) re-adds it. save_cache assumes its input keys
-# carry that prefix (harvest always holds prefixed keys), which is the usage
-# exercised here.
-
-def _prefixed(xid: str) -> str:
-    return "oai:arXiv.org:" + xid
-
+# exact on-disk format. Ids are stored and loaded bare; the OAI prefix is a
+# harvest-only concern and never reaches save_cache/load_cache.
 
 def test_save_cache_writes_expected_on_disk_format(tmp_path):
     path = str(tmp_path / "arxiv.txt")
     cache = {
-        _prefixed("2508.00002"): datetime.date(2025, 8, 12),
-        _prefixed("2508.00001"): datetime.date(2025, 8, 12),  # shares a date
-        _prefixed("cs/9301111"): datetime.date(1990, 1, 1),
+        "2508.00002": datetime.date(2025, 8, 12),
+        "2508.00001": datetime.date(2025, 8, 12),  # shares a date
+        "cs/9301111": datetime.date(1990, 1, 1),
     }
     util.save_cache(path, datetime.date(2026, 3, 5), cache)
 
     lines = open(path).read().splitlines()
     # the "latest datestamp" header, then ids grouped under a "<date>:" header,
-    # sorted by (date, id), prefix stripped. Ids sharing a date sit under one
-    # header rather than repeating the date on every line. (The README's extra
-    # "number of papers:" line is stale: the code neither writes nor reads it.)
+    # sorted by (date, id). Ids sharing a date sit under one header rather than
+    # repeating the date on every line. (The README's extra "number of papers:"
+    # line is stale: the code neither writes nor reads it.)
     assert lines == [
         "latest datestamp: 2026-03-05",
         "1990-01-01:",
@@ -82,25 +74,16 @@ def test_save_cache_writes_expected_on_disk_format(tmp_path):
 def test_cache_round_trip_preserves_entries_and_latest_date(tmp_path):
     path = str(tmp_path / "arxiv.txt")
     cache = {
-        _prefixed("2508.00002"): datetime.date(2025, 8, 12),
-        _prefixed("2508.00001"): datetime.date(2025, 8, 12),  # exercise a group
-        _prefixed("cs/9301111"): datetime.date(1990, 1, 1),
+        "2508.00002": datetime.date(2025, 8, 12),
+        "2508.00001": datetime.date(2025, 8, 12),  # exercise a group
+        "cs/9301111": datetime.date(1990, 1, 1),
     }
     latest = datetime.date(2026, 3, 5)
     util.save_cache(path, latest, cache)
 
-    # default load re-adds the prefix -> identity round-trip
     loaded, loaded_latest = util.load_cache(path)
-    assert loaded == cache
+    assert loaded == cache               # ids round-trip bare, identity
     assert loaded_latest == latest
-
-    # strip_prefix=True yields the bare ids that sample/vis consume
-    bare, _ = util.load_cache(path, strip_prefix=True)
-    assert bare == {
-        "2508.00002": datetime.date(2025, 8, 12),
-        "2508.00001": datetime.date(2025, 8, 12),
-        "cs/9301111": datetime.date(1990, 1, 1),
-    }
 
 
 def test_load_cache_reads_grouped(tmp_path):
@@ -115,9 +98,9 @@ def test_load_cache_reads_grouped(tmp_path):
         "2508.00001\n"
         "2508.00002\n"
     )
-    bare, latest = util.load_cache(path, strip_prefix=True)
+    cache, latest = util.load_cache(path)
     assert latest == datetime.date(2026, 3, 5)
-    assert bare == {
+    assert cache == {
         "cs/9301111": datetime.date(1990, 1, 1),
         "2508.00001": datetime.date(2025, 8, 12),
         "2508.00002": datetime.date(2025, 8, 12),

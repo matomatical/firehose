@@ -13,6 +13,10 @@ MAX_RPS = 1/3
 BATCH_SIZE = 3_500
 # BATCH_SIZE = 20_000 # for headers only
 
+# OAI-PMH record identifiers carry this prefix (e.g. "oai:arXiv.org:2603.04402").
+# Strip it at ingest so the cache and the rest of firehose deal in bare ids.
+OAI_ID_PREFIX = "oai:arXiv.org:"
+
 
 def harvest(
     expected_total: int | None = None,
@@ -92,7 +96,7 @@ def harvest(
             num_got_papers = 0
             num_skipped_papers = 0
             for record in batch:
-                xid = record.header.identifier
+                xid = record.header.identifier.removeprefix(OAI_ID_PREFIX)
                 submit_date = util.to_date(record.metadata['date'][0])
                 latest_date = util.to_date(record.header.datestamp)
                 classes = set(record.header.setSpecs)

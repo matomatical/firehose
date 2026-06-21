@@ -65,27 +65,21 @@ def data_paths(
 # sample.Readlog) both emit this grouped form.
 
 
-# FLAG: load_cache and load_readlog could be more similar -- move the OAI prefix
-# add/strip entirely into harvest (the only consumer of the prefix) and drop
-# load_cache's strip_prefix flag.
-
-
 def load_cache(
     path: str,
-    strip_prefix: bool = False,
 ) -> tuple[dict[str, datetime.date], datetime.date]:
     """
-    Load a list of dated paper ids from arxiv cache.
+    Load the {id: date} paper cache plus the "latest datestamp" watermark from
+    the first line. Ids are returned bare (the OAI prefix lives only in harvest).
     """
     with open(path, 'r') as f:
         # 1st line has form "latest datestamp: DATESTAMP"
         latest_date = to_date(next(f).strip().split(": ")[-1])
         # subsequent lines are papers (see the format note above)
         lines = f.read().splitlines()
-    prefix = "" if strip_prefix else "oai:arXiv.org:"
     cache = {}
     for xid, date in _parse_dated_lines(tqdm.tqdm(lines, ncols=80)):
-        cache[prefix + xid] = date
+        cache[xid] = date
     return cache, latest_date
 
 
@@ -134,14 +128,10 @@ def save_cache(
     cache: dict[str, datetime.date],
 ):
     """
-    Write list of dated paper ids to on-disk arxiv cache.
-
-    Keys are expected to carry the OAI prefix ("oai:arXiv.org:"), which is
-    stripped on the way out, so ids are stored bare. load_cache re-adds the
-    prefix by default (strip_prefix=False).
+    Write the {id: date} paper cache to disk: the "latest datestamp" watermark
+    on the first line, then the bare ids sorted by date and grouped.
     """
-    plen = len("oai:arXiv.org:")
-    sorted_cache = sorted((date, xid[plen:]) for xid, date in cache.items())
+    sorted_cache = sorted((date, xid) for xid, date in cache.items())
     with open(path, 'w') as f:
         f.write(f"latest datestamp: {to_datestamp(latest_date)}\n")
         _write_grouped(f, tqdm.tqdm(sorted_cache, ncols=80))

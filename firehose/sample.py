@@ -35,10 +35,7 @@ def sample(
 
     # load cached headers with overlapping classes
     print("loading papers from disk...")
-    cache, _ = util.load_cache(
-        path=paths.cache,
-        strip_prefix=True,
-    )
+    cache, _ = util.load_cache(path=paths.cache)
     print(f"loaded {len(cache)} papers")
 
     # load read papers from read log

@@ -81,7 +81,7 @@ def reading_calendar(
 
     if mode == "submit-date" or mode == "proportion":
         print("loading their submitted dates from paper cache...")
-        cache, _ = util.load_cache(path=paths.cache, strip_prefix=True)
+        cache, _ = util.load_cache(path=paths.cache)
         print(f"resolved {len(cache)} read papers")
     
     print("printing calendar...")
@@ -117,7 +117,7 @@ def linear(
     config = util.load_config(config_path)
     paths = util.data_paths(config, data_dir=data_dir)
     print("loading all submitted ids from paper cache...")
-    cache, _ = util.load_cache(path=paths.cache, strip_prefix=True)
+    cache, _ = util.load_cache(path=paths.cache)
     all_xids = list(cache.keys())
     print(f"found {len(all_xids)} papers")
 
@@ -148,7 +148,7 @@ def hilbert(
     config = util.load_config(config_path)
     paths = util.data_paths(config, data_dir=data_dir)
     print("loading all submitted ids from paper cache...")
-    cache, _ = util.load_cache(path=paths.cache, strip_prefix=True)
+    cache, _ = util.load_cache(path=paths.cache)
     all_xids = {xid: i for i, xid in enumerate(cache.keys())}
     print(f"found {len(all_xids)} papers")
 
