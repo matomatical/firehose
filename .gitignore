@@ -2,7 +2,7 @@ venv
 __pycache__
 .pytest_cache
 
-# firehose's data (the index + read/scan logs) and downloaded PDFs. Keep these
-# out of the code repo and back them up separately (see the README).
-data/
-downloads/
+# default location for firehose data (arxiv index + read/scan logs) and
+# downloaded PDFs. Back these up separately.
+data
+downloads
