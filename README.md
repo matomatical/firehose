@@ -3,8 +3,6 @@ Firehose
 
 *The academic news feed for completionists.*
 
-<img src="images/days.png" alt="firehose days">
-
 Hundreds of machine learning papers are published to arXiv every day. ArXiv is
 designed to email titles and abstracts of papers published under each category.
 Historically, when machine learning was a smaller field, or for categories that
@@ -57,8 +55,6 @@ From mid April 2025 to February 2026, I scanned all of the 100,000 titles
 published in computer science and machine learning categories.
 
 <img src="images/reading-calendar.png" alt="firehose calendar">
-
-<img src="images/proportion.png" alt="firehose calendar --mode proportion">
 
 About 2.5 percent of these papers seemed broadly relevant to my research
 interests enough to file in my reading list.
@@ -257,12 +253,18 @@ Firehose can render visualisations of the index and read log to the terminal:
   colours the submission dates of papers you've read; `--mode proportion` shows
   what fraction of each day's papers you've seen.
 
+  <img src="images/proportion.png" alt="firehose calendar --mode proportion">
+
 * **`days`**: draws the same kind of heatmap over the submission dates of
   *every* indexed paper, giving a nice picture of arXiv's historical growth in
   your categories.
 
+  <img src="images/days.png" alt="firehose days">
+
 * **`linear`**: your progress through the entire index, in batches of 100
   papers, along with the total percentage read.
+
+  <img src="images/linear.png" alt="firehose linear">
 
 * **`hilbert`**: the whole index laid out along a Hilbert curve, lit up where
   you've read. `--live` redraws every few seconds, so you can leave it running
@@ -270,13 +272,11 @@ Firehose can render visualisations of the index and read log to the terminal:
 
   This one is large, I recommend using `--size 8` to clip to the most recent
   4^8 = 65k submissions and zooming out a little.
+  
+  <img src="images/hilbert.png" alt="firehose hilbert">
 
 There's also `months` and `years` which print plain-text counts by group,
 useful to get an idea of historical volume.
-
-<img src="images/submissions-calendar.png" alt="submission-date heatmap of the whole index" width="300">
-<img src="images/linear.png" alt="linear reading-progress visualisation" width="560">
-<img src="images/hilbert.png" alt="Hilbert-curve read-map of the whole index" width="420">
 
 Data files
 ----------
