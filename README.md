@@ -134,12 +134,15 @@ First time usage after installation:
 * Configure categories in `config.toml`.
 * Run `firehose harvest` (needs a couple hours) to download local index of
   arxiv ids in your categories.
+* Set up separate private git repo inside the data/ folder to save your
+  progress.
 
 Daily usage:
 
 * Run `firehose harvest` (needs <1min) to update local index of arxiv ids
 * Run `firehose sample <n<` to launch the terminal UI scanner and scan the
   latest *n* papers (see `--help` for more options).
+* **Important:** Update git tracking of the data/ folder to save your progress.
 * Run `firehose calendar` or other subcommands to marvel at your progress.
 
 ### `harvest`: build the index
