@@ -20,7 +20,10 @@ Firehose is that tool. Features:
   with shortcuts for copying titles or downloading PDFs.
 * Draws pretty pictures of how much of the arXiv backlog I've seen.
 
-Why would anyone want to read every title published to ML arXiv? It's an
+Motivation
+----------
+
+Wait, why would anyone want to read every title published to ML arXiv? It's an
 overwhelming amount of material, most of which is completely irrelevant and
 some of which is slop. This is not for the faint of heart. If you prefer
 precision over recall, you might want to use another tool:
@@ -48,19 +51,47 @@ Caveats:
   aesthetics. It isn't in package managers and I make no promises of support
   (but the code is simple and hackable, especially for AI agents).
 
-Usage
------
+My usage
+--------
 
-From mid April 2025 to February 2026, I scanned all of the 100,000 titles
+From mid April 2025 to late February 2026, I scanned around 120,000 titles
 published in computer science and machine learning categories.
+
+Here is a visualisation of the volume of reading each day:
 
 <img src="images/reading-calendar.png" alt="firehose calendar">
 
-About 2.5 percent of these papers seemed broadly relevant to my research
-interests enough to file in my reading list.
+The colour indicates the number of titles I scanned (magenta: 1, cyan: 2.4k,
+blank: zero). I took the last few months off due to some deadlines and travel,
+but now I'm getting back into it as of today.
 
-For a smaller number of papers highly relevant to my active projects or those
-of my colleagues, I saw these papers first and only using this tool.
+I spend somewhere around 4 seconds per title on average, including time to
+dwell on interesting abstracts and download/file away useful papers into my
+reading list, suggesting reading 120k titles took me about 130 hours. I just
+started tracking more granular timing information so will get a precise picture
+of this going forward.
+
+So much time, what did I gain?
+
+* About 2.5 percent of the papers I saw seemed broadly relevant to my research
+  interests enough to file in my reading list, keeping my mental model of the
+  literature up to date as new directions emerge.
+
+* For a smaller number of papers highly relevant to my active projects or those
+  of my colleagues, I saw these papers first and only using this tool and was
+  able to rapidly share this information.
+
+* I developed a fairly visceral sense of the volume and depth of work in modern
+  machine learning, in a way that seems important for my intellectual
+  development but I'm not yet able to articulate.
+
+* When I was using the tool, I felt really powerful and like nothing could
+  surprise me. On the flip side, when I fell behind, it felt overwhelming to
+  start again.
+
+I think I can sustainably commit to spending about 30 minutes a day on this
+going forward, which should be enough to keep up with new papers until another
+half-doubling or so of the rate of papers being published.
 
 Installation
 ------------
