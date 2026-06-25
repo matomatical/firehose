@@ -143,7 +143,7 @@ easiest way to start is to edit the one that's already there.
 
   Can be overridden at run-time with `--data-dir`.
 
-* `paths.downloads` controles where PDFs are downloaded.
+* `paths.downloads` controls where PDFs are downloaded.
   
   Can be overridden at run-time with `--download-dir`.
 
@@ -167,7 +167,7 @@ First time usage after installation:
 Daily usage:
 
 * Run `firehose harvest` (needs <1min) to update local index of arxiv ids
-* Run `firehose sample <n<` to launch the terminal UI scanner and scan the
+* Run `firehose sample <n>` to launch the terminal UI scanner and scan the
   latest *n* papers (see `--help` for more options).
 * **Important:** Update git tracking of the data/ folder to save your progress.
 * Run `firehose calendar` or other subcommands to marvel at your progress.
