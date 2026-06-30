@@ -188,6 +188,23 @@ def log_event(path: str, event: dict) -> None:
         f.write(json.dumps(record) + "\n")
 
 
+def load_scanlog(path: str) -> list[dict]:
+    """
+    Read every event from the scan log: the JSON object on each non-blank line,
+    in file (chronological) order. The inverse of log_event. Returns [] if the
+    log does not exist yet (no scans recorded).
+    """
+    if not os.path.exists(path):
+        return []
+    events = []
+    with open(path, "r") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                events.append(json.loads(line))
+    return events
+
+
 # # # 
 # Date utilities
 

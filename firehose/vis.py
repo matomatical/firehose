@@ -3,6 +3,7 @@ import collections
 import datetime
 import time
 import typing
+from dataclasses import dataclass
 
 import matthewplotlib as mp
 
@@ -194,35 +195,55 @@ def hilbert(
                 break
 
 
-def vis_dates(
-    dates: list[datetime.date],
-    all_dates: None | list[datetime.date] = None,
-    print_counts: bool = True,
-) -> mp.plot:
+def scan_time(
+    config_path: str = util.CONFIG_PATH,
+    data_dir: str | None = None,
+    heatmap: bool = True,
+    save_as: str | None = None,
+):
     """
-    Adapted from matthewplotlib calendar heatmap example.
+    Report time spent scanning abstracts: per day, in total, and per paper.
+
+    Derives dwell from the scan log (data/scanlog.jsonl), the per-session
+    start/view/.../end event stream. A session's active time is the wall-clock
+    between its events minus any spans you paused (mirroring the live sample
+    timer); "per paper" divides by distinct papers seen, matching sample's
+    on-screen seconds/paper. With --heatmap (default), also draws a calendar
+    tinted by each day's scanning time.
     """
-    datelines = []
-    # count dates
-    counts = collections.Counter(dates)
-    if print_counts:
-        for datestamp, count in sorted(counts.items()):
-            datelines.append(mp.text(f"{datestamp} {count}  "))
+    config = util.load_config(config_path)
+    paths = util.data_paths(config, data_dir=data_dir)
+    print("loading scan log...")
+    events = util.load_scanlog(path=paths.scanlog)
+    print(f"loaded {len(events)} events")
 
-    if len(counts) == 0:
-        return mp.text("(no dates)")
+    summary = summarise_scan_time(events)
+    if not summary.days:
+        print("no scans recorded yet.")
+        return
 
-    # normalise counts
-    if all_dates is None:
-        max_count = max(counts.values())
-        norm_data = {date: count/max_count for date, count in counts.items()}
-    else:
-        total_counts = collections.Counter(all_dates)
+    print(render_scan_time(summary))
+
+    if heatmap:
+        max_seconds = max(day.seconds for day in summary.days)
         norm_data = {
-            date: counts.get(date, 0) / total_counts[date]
-            for date in total_counts.keys()
+            day.date: (day.seconds / max_seconds if max_seconds else 0.0)
+            for day in summary.days
         }
+        vis = _vis_month_grid(norm_data)
+        print(vis)
+        if save_as:
+            print(f"saving heatmap to {save_as}...")
+            vis.saveimg(save_as)
 
+
+def _vis_month_grid(norm_data: dict[datetime.date, float]) -> mp.plot:
+    """
+    Render the month-by-month calendar heatmap for a {date: intensity} map,
+    where each intensity in [0, 1] picks a colour from the `cyber` map. Spans
+    every month from the earliest to the latest dated day; days with no entry
+    are drawn as a dim marker. Assumes `norm_data` is non-empty.
+    """
     start_date = min(norm_data.keys())
     end_date = max(norm_data.keys())
     year = start_date.year
@@ -253,14 +274,46 @@ def vis_dates(
             mp.vstack(title, daynames, *week_plots)
             + mp.blank(2,2),
         )
-        
+
         # increment month
         month += 1
         if month == 13:
             year += 1
             month = 1
 
-    calendar_plot = mp.wrap(*month_plots)
+    return mp.wrap(*month_plots)
+
+
+def vis_dates(
+    dates: list[datetime.date],
+    all_dates: None | list[datetime.date] = None,
+    print_counts: bool = True,
+) -> mp.plot:
+    """
+    Adapted from matthewplotlib calendar heatmap example.
+    """
+    datelines = []
+    # count dates
+    counts = collections.Counter(dates)
+    if print_counts:
+        for datestamp, count in sorted(counts.items()):
+            datelines.append(mp.text(f"{datestamp} {count}  "))
+
+    if len(counts) == 0:
+        return mp.text("(no dates)")
+
+    # normalise counts
+    if all_dates is None:
+        max_count = max(counts.values())
+        norm_data = {date: count/max_count for date, count in counts.items()}
+    else:
+        total_counts = collections.Counter(all_dates)
+        norm_data = {
+            date: counts.get(date, 0) / total_counts[date]
+            for date in total_counts.keys()
+        }
+
+    calendar_plot = _vis_month_grid(norm_data)
     if print_counts:
         if len(datelines) > 50:
             counts_plot = mp.wrap(
@@ -310,5 +363,148 @@ def vis_all(
         )
     )
     return plot
+
+
+# # #
+# Scan-time analytics (pure core)
+#
+# `scan_time` shells around these. They reduce a flat scanlog event list (from
+# util.load_scanlog) into per-day and total dwell figures, with no I/O. The
+# model mirrors sample.Stopwatch / sample's on-screen seconds/paper: time is
+# wall-clock between consecutive events, paused spans excluded, and "papers"
+# counts the distinct ids seen.
+
+
+@dataclass
+class DayStats:
+    """One day's scanning: sessions run, distinct papers seen, active seconds."""
+    date: datetime.date
+    sessions: int
+    papers: int
+    seconds: float
+
+    @property
+    def seconds_per_paper(self) -> float:
+        return self.seconds / self.papers if self.papers else 0.0
+
+
+@dataclass
+class ScanTimeSummary:
+    """Per-day breakdown plus the grand totals across every session."""
+    days: list[DayStats]
+    sessions: int
+    papers: int
+    seconds: float
+
+    @property
+    def seconds_per_paper(self) -> float:
+        return self.seconds / self.papers if self.papers else 0.0
+
+
+def split_sessions(events: list[dict]) -> list[list[dict]]:
+    """
+    Group a flat event list into sessions. A session opens on a "start" event
+    and runs to its "end"; a fresh "start" with no intervening "end" (a crash
+    mid-session) defensively closes the previous one, and a trailing run with no
+    "end" yet (a session in progress) is still returned.
+    """
+    sessions = []
+    current = []
+    for event in events:
+        if event.get("type") == "start" and current:
+            sessions.append(current)
+            current = []
+        current.append(event)
+        if event.get("type") == "end":
+            sessions.append(current)
+            current = []
+    if current:
+        sessions.append(current)
+    return sessions
+
+
+def session_active_seconds(events: list[dict]) -> float:
+    """
+    Active wall-clock seconds in one session: the gaps between consecutive
+    events summed, but a gap that opens on a "pause" event (idle until the
+    "resume") is dropped. This matches sample.Stopwatch, which only stops the
+    clock for explicit pauses.
+    """
+    total = 0.0
+    paused = False
+    for before, after in zip(events, events[1:]):
+        if before.get("type") == "pause":
+            paused = True
+        elif before.get("type") == "resume":
+            paused = False
+        if not paused:
+            t0 = datetime.datetime.fromisoformat(before["t"])
+            t1 = datetime.datetime.fromisoformat(after["t"])
+            total += (t1 - t0).total_seconds()
+    return total
+
+
+def summarise_scan_time(events: list[dict]) -> ScanTimeSummary:
+    """
+    Reduce a flat scanlog event list to a ScanTimeSummary: per-day DayStats
+    (sorted by date, each session attributed to the day it began) and the grand
+    totals. Distinct papers and active seconds are summed across sessions, so a
+    paper re-viewed in a later session counts once per session (as the live
+    seconds/paper does).
+    """
+    by_day: dict[datetime.date, DayStats] = {}
+    total_sessions = 0
+    for session in split_sessions(events):
+        if not session:
+            continue
+        total_sessions += 1
+        day = datetime.datetime.fromisoformat(session[0]["t"]).date()
+        papers = len({
+            e["xid"] for e in session if e.get("type") == "view"
+        })
+        seconds = session_active_seconds(session)
+        stats = by_day.get(day)
+        if stats is None:
+            stats = by_day[day] = DayStats(day, 0, 0, 0.0)
+        stats.sessions += 1
+        stats.papers += papers
+        stats.seconds += seconds
+    days = [by_day[day] for day in sorted(by_day)]
+    return ScanTimeSummary(
+        days=days,
+        sessions=total_sessions,
+        papers=sum(d.papers for d in days),
+        seconds=sum(d.seconds for d in days),
+    )
+
+
+def _fmt_hms(seconds: float) -> str:
+    """Whole-second H:MM:SS, e.g. 625.4 -> '0:10:25'."""
+    return str(datetime.timedelta(seconds=round(seconds)))
+
+
+def _scan_time_row(label: str, papers: int, seconds: float, per_paper: float) -> str:
+    return f"{label:<10} {papers:>7} {_fmt_hms(seconds):>9} {per_paper:>8.2f}s"
+
+
+def render_scan_time(summary: ScanTimeSummary) -> str:
+    """Format a ScanTimeSummary as a plain-text table with a totals row."""
+    header = f"{'date':<10} {'papers':>7} {'time':>9} {'s/paper':>9}"
+    lines = [header]
+    for day in summary.days:
+        lines.append(_scan_time_row(
+            day.date.isoformat(), day.papers, day.seconds, day.seconds_per_paper,
+        ))
+    lines.append("─" * len(header))
+    lines.append(_scan_time_row(
+        "TOTAL", summary.papers, summary.seconds, summary.seconds_per_paper,
+    ))
+    lines.append("")
+    lines.append(
+        f"{summary.sessions} sessions, {summary.papers} papers, "
+        f"{_fmt_hms(summary.seconds)} total, "
+        f"{summary.seconds_per_paper:.2f}s per paper"
+    )
+    return "\n".join(lines)
 
 

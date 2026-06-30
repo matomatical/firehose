@@ -21,4 +21,6 @@ def cli():
         'days': firehose.vis.all_submitted_dates,
         'months': firehose.vis.all_submitted_months,
         'years': firehose.vis.all_submitted_years,
+        # scanning-time analytics from the scan log
+        'time': firehose.vis.scan_time,
     })

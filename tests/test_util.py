@@ -262,3 +262,30 @@ def test_log_event_creates_missing_parent_dir(tmp_path):
     util.log_event(path, {"type": "start", "n": 3})
     assert os.path.exists(path)
     assert json.loads(open(path).read())["n"] == 3
+
+
+# -- scanlog reader ------------------------------------------------------------
+
+def test_load_scanlog_round_trips_log_event(tmp_path):
+    # load_scanlog is the inverse of log_event: it yields the written events
+    # (with the stamped "t") in chronological order.
+    path = str(tmp_path / "scanlog.jsonl")
+    util.log_event(path, {"type": "start", "n": 2})
+    util.log_event(path, {"type": "view", "xid": "2508.00001"})
+    util.log_event(path, {"type": "end"})
+
+    events = util.load_scanlog(path)
+    assert [e["type"] for e in events] == ["start", "view", "end"]
+    assert events[0]["n"] == 2 and events[1]["xid"] == "2508.00001"
+    assert all("t" in e for e in events)
+
+
+def test_load_scanlog_skips_blank_lines(tmp_path):
+    path = tmp_path / "scanlog.jsonl"
+    path.write_text('{"t": "2026-06-22T11:00:00", "type": "view", "xid": "a"}\n\n')
+    assert len(util.load_scanlog(str(path))) == 1
+
+
+def test_load_scanlog_missing_file_is_empty(tmp_path):
+    # no scans recorded yet -> [], not a crash (the file is created on first scan)
+    assert util.load_scanlog(str(tmp_path / "absent.jsonl")) == []
