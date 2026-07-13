@@ -15,6 +15,7 @@ def cli():
         # print arXiv category catalog
         'classes': firehose.classes.classes,
         # visualising readlog and cache
+        'unread': firehose.vis.unread,
         'calendar': firehose.vis.reading_calendar,
         'linear': firehose.vis.linear,
         'hilbert': firehose.vis.hilbert,

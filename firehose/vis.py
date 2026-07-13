@@ -30,6 +30,46 @@ def all_submitted_dates(
         vis.saveimg(save_as)
 
 
+def unread(
+    modern: bool = True,
+    config_path: str = util.CONFIG_PATH,
+    data_dir: str | None = None,
+    save_as: str | None = None,
+):
+    """
+    Show unread papers by submission date on a calendar heatmap.
+
+    Loads the paper cache and the read log, drops papers already seen and (with
+    --modern, the default) those on or before the modern cutoff, then renders the
+    rest by submission date. This is the calendar `sample` prints as its dry run,
+    without any API query or download. Pass --no-modern to include the full
+    backlog, --save-as to write the calendar to an image.
+    """
+    config = util.load_config(config_path)
+    paths = util.data_paths(config, data_dir=data_dir)
+
+    print("loading papers from disk...")
+    cache, _ = util.load_cache(path=paths.cache)
+    print(f"loaded {len(cache)} papers")
+
+    print("checking which have already been read...")
+    readlog, _ = util.load_readlog(path=paths.readlog)
+    read = set(readlog)
+    print(f"loaded {len(read)} already-read papers")
+
+    cutoff = config["scan"]["modern_cutoff"] if modern else None
+    unread_dates = select_unread_dates(cache, read, cutoff=cutoff)
+    print(f"found {len(unread_dates)} unread papers")
+
+    print("printing calendar...")
+    vis = vis_dates(unread_dates)
+    print(vis)
+
+    if save_as:
+        print(f"saving calendar to {save_as}...")
+        vis.saveimg(save_as)
+
+
 def all_submitted_years(
     config_path: str = util.CONFIG_PATH,
     data_dir: str | None = None,
@@ -282,6 +322,23 @@ def _vis_month_grid(norm_data: dict[datetime.date, float]) -> mp.plot:
             month = 1
 
     return mp.wrap(*month_plots)
+
+
+def select_unread_dates(
+    cache: dict[str, datetime.date],
+    read: set[str],
+    cutoff: datetime.date | None = None,
+) -> list[datetime.date]:
+    """
+    Submission dates of the unread papers in the cache: those whose id is not in
+    `read` and (when a `cutoff` is given) dated after it. Pure — the data-shaping
+    behind the `unread` command, mirroring sample.select_papers' filter without
+    its windowing (no n / backwards / randomise / offset). Order follows cache.
+    """
+    return [
+        date for xid, date in cache.items()
+        if xid not in read and (cutoff is None or date > cutoff)
+    ]
 
 
 def vis_dates(
