@@ -150,8 +150,15 @@ def test_render_scan_time_has_totals_row():
     ]
     out = vis.render_scan_time(vis.summarise_scan_time(events))
     assert "2026-06-22" in out
-    assert "TOTAL" in out
-    assert "1 sessions, 1 papers" in out
+    total = next(line for line in out.splitlines() if line.startswith("TOTAL"))
+    # sessions and papers columns both read 1
+    assert total.split() == ["TOTAL", "1", "1", "0:00:10", "10.00s"]
+
+
+def test_scan_time_legend_names_both_ends():
+    # magenta end is always 0:00:00; cyan end is the busiest day (625s -> 0:10:25)
+    label = str(vis._scan_time_legend(625.0)).splitlines()[0]
+    assert label == "time spent: (magenta = 0:00:00, cyan = 0:10:25)"
 
 
 def test_scan_time_entry_point_runs_against_tmp_scanlog(tmp_path, capsys):
@@ -168,7 +175,8 @@ def test_scan_time_entry_point_runs_against_tmp_scanlog(tmp_path, capsys):
         heatmap=False,
     )
     out = capsys.readouterr().out
-    assert "TOTAL" in out and "1 sessions, 1 papers" in out
+    total = next(line for line in out.splitlines() if line.startswith("TOTAL"))
+    assert total.split()[:3] == ["TOTAL", "1", "1"]  # sessions, papers
 
 
 def test_scan_time_entry_point_no_scans(tmp_path, capsys):

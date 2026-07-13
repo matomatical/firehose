@@ -307,9 +307,10 @@ Firehose can render visualisations of the index and read log to the terminal:
   <img src="images/hilbert.png" alt="firehose hilbert">
 
 * **`time`**: how long you've spent scanning, read back from the scan log
-  (`scanlog.jsonl`). Prints a per-day table of papers seen, time spent, and
-  seconds per paper, with a grand-total row, then (unless `--no-heatmap`) a
-  calendar tinted by each day's scanning time. Dwell is the wall-clock between
+  (`scanlog.jsonl`). Prints a per-day table of sessions run, papers seen, time
+  spent, and seconds per paper, with a grand-total row, then (unless
+  `--no-heatmap`) a calendar tinted by each day's scanning time (magenta = none,
+  cyan = the busiest day, above a matching colour key). Dwell is the wall-clock between
   log events with paused spans excluded, and "per paper" counts distinct papers
   seen — the same figure `sample` shows live.
 

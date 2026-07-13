@@ -270,11 +270,27 @@ def scan_time(
             day.date: (day.seconds / max_seconds if max_seconds else 0.0)
             for day in summary.days
         }
+        print()
+        print(_scan_time_legend(max_seconds))
+        print()
         vis = _vis_month_grid(norm_data)
         print(vis)
         if save_as:
             print(f"saving heatmap to {save_as}...")
             vis.saveimg(save_as)
+
+
+def _scan_time_legend(max_seconds: float) -> mp.plot:
+    """
+    Colour key for the calendar heatmap: the `cyber` gradient tints each day
+    from magenta (no scanning) to cyan (the busiest day), matching
+    _vis_month_grid. The gradient bar sits under a label naming both ends.
+    """
+    label = f"time spent: (magenta = {_fmt_hms(0)}, cyan = {_fmt_hms(max_seconds)})"
+    width = len(label)
+    row = [i / (width - 1) for i in range(width)]
+    bar = mp.image([row, row], colormap=mp.cyber)  # 2 rows -> 1 char tall
+    return mp.vstack(mp.text(label), bar)
 
 
 def _vis_month_grid(norm_data: dict[datetime.date, float]) -> mp.plot:
@@ -540,28 +556,26 @@ def _fmt_hms(seconds: float) -> str:
     return str(datetime.timedelta(seconds=round(seconds)))
 
 
-def _scan_time_row(label: str, papers: int, seconds: float, per_paper: float) -> str:
-    return f"{label:<10} {papers:>7} {_fmt_hms(seconds):>9} {per_paper:>8.2f}s"
+def _scan_time_row(
+    label: str, sessions: int, papers: int, seconds: float, per_paper: float,
+) -> str:
+    return f"{label:<10} {sessions:>8} {papers:>7} {_fmt_hms(seconds):>9} {per_paper:>8.2f}s"
 
 
 def render_scan_time(summary: ScanTimeSummary) -> str:
     """Format a ScanTimeSummary as a plain-text table with a totals row."""
-    header = f"{'date':<10} {'papers':>7} {'time':>9} {'s/paper':>9}"
+    header = f"{'date':<10} {'sessions':>8} {'papers':>7} {'time':>9} {'s/paper':>9}"
     lines = [header]
     for day in summary.days:
         lines.append(_scan_time_row(
-            day.date.isoformat(), day.papers, day.seconds, day.seconds_per_paper,
+            day.date.isoformat(), day.sessions, day.papers,
+            day.seconds, day.seconds_per_paper,
         ))
     lines.append("─" * len(header))
     lines.append(_scan_time_row(
-        "TOTAL", summary.papers, summary.seconds, summary.seconds_per_paper,
+        "TOTAL", summary.sessions, summary.papers,
+        summary.seconds, summary.seconds_per_paper,
     ))
-    lines.append("")
-    lines.append(
-        f"{summary.sessions} sessions, {summary.papers} papers, "
-        f"{_fmt_hms(summary.seconds)} total, "
-        f"{summary.seconds_per_paper:.2f}s per paper"
-    )
     return "\n".join(lines)
 
 
