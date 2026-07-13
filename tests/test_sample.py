@@ -14,7 +14,7 @@ import readchar
 from firehose import util
 from firehose.sample import (
     Scanner, Paper, Log, Clip, Open, MarkRead, Download, DeletePDF,
-    PauseTimer, ResumeTimer, render_frame, KEY_TO_COMMAND,
+    PauseTimer, ResumeTimer, render_frame, KEY_TO_COMMAND, TRUNCATED_NOTICE,
     Session, Scanlog, Readlog, Downloads, Stopwatch, select_papers,
 )
 
@@ -279,6 +279,81 @@ def test_render_shows_state_glyph():
     assert "☆" in render_frame(sc, 0.0)
     sc.feed("down")  # -> downloaded
     assert "★" in render_frame(sc, 0.0)
+
+
+def _longpaper():
+    p = mkpaper(1)
+    p.summary = ("Lorem ipsum dolor sit amet. " * 40).strip()
+    return p
+
+
+def _rows(frame: str) -> int:
+    # display rows the frame occupies (the \033[2J\033[H prefix has no newline)
+    return frame.count("\n") + 1
+
+
+def test_render_no_clip_when_rows_none():
+    sc = Scanner([_longpaper()]); sc.start()
+    frame = render_frame(sc, 0.0, rows=None)
+    assert TRUNCATED_NOTICE not in frame
+    assert "ipsum" in frame  # full abstract present
+
+
+def test_render_truncates_when_frame_overflows():
+    sc = Scanner([_longpaper()]); sc.start()
+    frame = render_frame(sc, 0.0, rows=12)
+    # clipped to at most rows-1 lines so print()'s newline can't scroll it
+    assert _rows(frame) <= 11
+    assert frame.rstrip().endswith(TRUNCATED_NOTICE)
+    assert "Title 1" in frame  # header/title kept
+
+
+def test_render_no_truncation_when_it_fits():
+    sc = Scanner(papers(1)); sc.start()  # short "A summary."
+    frame = render_frame(sc, 0.0, rows=40)
+    assert TRUNCATED_NOTICE not in frame
+
+
+def test_render_expanded_shows_full_frame_even_if_overflowing():
+    sc = Scanner([_longpaper()]); sc.start()
+    sc.feed("expand")
+    frame = render_frame(sc, 0.0, rows=12)
+    assert TRUNCATED_NOTICE not in frame
+    assert "ipsum" in frame  # whole abstract emitted (it may scroll)
+
+
+def test_render_truncated_keeps_action_message():
+    sc = Scanner([_longpaper()]); sc.start()
+    sc.feed("save")  # sets message "saved ☆"
+    frame = render_frame(sc, 0.0, rows=12)
+    assert TRUNCATED_NOTICE in frame
+    assert "saved" in frame  # feedback survives clipping
+
+
+# -- expand command ------------------------------------------------------------
+
+def test_expand_toggles_and_emits_no_effects():
+    sc = Scanner(papers(1)); sc.start()
+    assert sc.expanded is False
+    assert sc.feed("expand") == []
+    assert sc.expanded is True
+    assert sc.feed("expand") == []
+    assert sc.expanded is False
+
+
+def test_expand_works_while_paused():
+    sc = Scanner(papers(1)); sc.start()
+    sc.feed("pause")
+    sc.feed("expand")
+    assert sc.expanded is True and sc.paused is True
+
+
+def test_navigation_resets_expanded():
+    sc = Scanner(papers(2)); sc.start()
+    sc.feed("expand")
+    assert sc.expanded is True
+    sc.feed("forward")
+    assert sc.expanded is False
 
 
 # -- effects: end-to-end through the session sinks (I/O mocked) ----------------

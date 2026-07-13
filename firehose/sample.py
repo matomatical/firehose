@@ -15,6 +15,7 @@ them to scan, recording views / saves / downloads.
 import datetime
 import os
 import random
+import shutil
 import textwrap
 import time
 from dataclasses import dataclass
@@ -46,6 +47,8 @@ KEY_TO_COMMAND = {
     "s": "save",
     "d": "download",
     "x": "remove",
+    # expand a truncated frame to see the full abstract (toggle)
+    "e": "expand",
 }
 
 
@@ -166,7 +169,10 @@ def sample(
     for effect in sc.start():
         effect.run(session)
     while not sc.done:
-        print(render_frame(sc, session.stopwatch.elapsed()))
+        # measure the terminal each frame so a mid-scan resize is respected;
+        # shutil (not os) falls back to 80x24 off a TTY instead of raising.
+        rows = shutil.get_terminal_size().lines
+        print(render_frame(sc, session.stopwatch.elapsed(), rows=rows))
         command = KEY_TO_COMMAND.get(readchar.readkey())
         if command is None:
             continue
@@ -241,6 +247,7 @@ class Scanner:
         self.nseen = -1                     # highest index reached so far
         self.paused = False
         self.done = False
+        self.expanded = False               # show full frame (past screen edge)
         self.message = ""
 
     @property
@@ -257,6 +264,7 @@ class Scanner:
 
     def _arrive(self):
         # effects emitted when landing on the current paper
+        self.expanded = False   # each new paper starts collapsed
         effects = []
         if self.index > self.nseen:
             self.nseen = self.index
@@ -271,6 +279,12 @@ class Scanner:
     def feed(self, command):
         """Apply a semantic command and return the effects the shell must run."""
         self.message = ""
+
+        # expand/collapse is a view-only toggle: it works whether running or
+        # paused, touches no timer, and emits no effects (the loop re-renders).
+        if command == "expand":
+            self.expanded = not self.expanded
+            return []
 
         # while paused, only resume and quit respond
         if self.paused:
@@ -415,9 +429,22 @@ class Paper:
 GLYPHS = {"none": " ", "saved": "☆", "downloaded": "★"}
 
 
-def render_frame(scanner, elapsed: float):
+TRUNCATED_NOTICE = "\033[2m[Truncated... press 'e' to expand]\033[0m"
+
+
+def render_frame(scanner, elapsed: float, *, rows: int | None = None):
     """
     Build the full terminal frame for the scanner's current paper.
+
+    The frame is anchored to the top of the terminal: it is clipped to `rows`
+    display lines so the trailing newline print() adds never lands on the
+    bottom row (which would scroll the frame, dragging the header/title/authors
+    off the top and leaving only the abstract tail on screen). When the frame
+    would overflow, the abstract tail is dropped and a self-documenting notice
+    is shown on the last line; pressing 'e' sets `scanner.expanded`, which
+    renders the full frame instead (letting it scroll, so the whole abstract is
+    reachable via the terminal's own scrollback). `rows=None` disables clipping
+    (used by tests / non-interactive callers).
     """
     p = scanner.current
     cats = ', '.join("\033[3m" + str(c) + "\033[0m" for c in p.categories)
@@ -425,8 +452,9 @@ def render_frame(scanner, elapsed: float):
     seen = scanner.nseen + 1
     average = elapsed / seen if seen > 0 else 0.0
     glyph = GLYPHS[scanner.state]
-    lines = [
-        '\033[2J\033[H',
+
+    # header: the scanning essentials, kept whenever the frame is clipped
+    header = [
         f"[{scanner.index + 1} / {scanner.n}] "
         f"{mp.progress((scanner.index + 1) / scanner.n, width=60)} {glyph}",
         f"{datetime.timedelta(seconds=int(elapsed))} ({average:.2f} seconds/paper)"
@@ -435,15 +463,32 @@ def render_frame(scanner, elapsed: float):
         f"published: {p.published} updated: {p.updated}",
         "\033[1m" + textwrap.fill(p.title, width=80) + "\033[0m",
         "\033[2m" + textwrap.fill(authors, width=80) + "\033[0m",
-        textwrap.fill(p.summary, width=80),
-        "",
     ]
+    body = [*header, textwrap.fill(p.summary, width=80), ""]
     if p.comment is not None:
-        lines.append(f"comment: {p.comment}")
-    lines.append("")
+        body.append(f"comment: {p.comment}")
+    body.append("")
     if scanner.message:
-        lines.append(scanner.message)
-    return "\n".join(lines)
+        body.append(scanner.message)
+
+    prefix = "\033[2J\033[H"
+    full = "\n".join(body)
+
+    # keep one row spare so print()'s trailing newline can't trigger a scroll
+    budget = None if rows is None else max(1, rows - 1)
+    n_lines = full.count("\n") + 1
+    if scanner.expanded or budget is None or n_lines <= budget:
+        return prefix + full
+
+    # overflow + collapsed: keep the top, drop the abstract tail, and end with
+    # a notice (plus any transient message) on the bottom rows.
+    tail = ([scanner.message] if scanner.message else []) + [TRUNCATED_NOTICE]
+    main = [*header, textwrap.fill(p.summary, width=80)]
+    if p.comment is not None:
+        main += ["", f"comment: {p.comment}"]
+    main_rows = "\n".join(main).split("\n")
+    keep = max(0, budget - len(tail))
+    return prefix + "\n".join(main_rows[:keep] + tail)
 
 
 # # # 
