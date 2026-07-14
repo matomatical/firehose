@@ -253,6 +253,11 @@ is my own custom format:
             '-- The title of the paper
 ```
 
+The `saved` / `downloaded` state records the action in Firehose even when no
+clipboard is available (as is common in a headless SSH session). The action
+message reports either `(copied to clipboard)` or `(clipboard not available)`
+so clipboard delivery is never ambiguous.
+
 I paste these into a free-form markdown reading list manager which is how I
 keep track of the literature.
 
@@ -382,4 +387,3 @@ will require quite deep refactoring of the tool.
 * [ ] arbitrary RSS feeds.
 * [ ] substack, medium, maybe custom blogs.
 * [ ] maybe twitter, specific accounts (these days this is not free).
-

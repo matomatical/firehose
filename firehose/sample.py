@@ -167,8 +167,7 @@ def sample(
         downloads=Downloads(download_dir),
         stopwatch=Stopwatch(),
     )
-    for effect in sc.start():
-        effect.run(session)
+    run_effects(sc, sc.start(), session)
     while not sc.done:
         # measure the terminal each frame so a mid-scan resize is respected;
         # shutil (not os) falls back to 80x24 off a TTY instead of raising.
@@ -177,8 +176,7 @@ def sample(
         command = KEY_TO_COMMAND.get(readchar.readkey())
         if command is None:
             continue
-        for effect in sc.feed(command):
-            effect.run(session)
+        run_effects(sc, sc.feed(command), session)
     print("done!")
 
 
@@ -355,7 +353,7 @@ class Scanner:
 
     def _download(self):
         self.states[self.index] = "downloaded"
-        self.message = "downloaded ★"
+        self.message = "downloading..."
         return [
             # Commit the external effect before recording/copying success. If
             # the download raises, the remaining effects are never run.
@@ -363,6 +361,15 @@ class Scanner:
             Log({"type": "download", "xid": self.xid}),
             Clip(f"- {self.current.name}\n"),
         ]
+
+    def clipboard_finished(self, copied: bool):
+        """Add clipboard delivery feedback to the current action message."""
+        detail = "copied to clipboard" if copied else "clipboard not available"
+        self.message += f" ({detail})"
+
+    def download_finished(self, completed_progress: str):
+        """Replace the in-progress message with the completed download bar."""
+        self.message = completed_progress
 
     def _remove(self):
         was = self.states[self.index]
@@ -579,8 +586,9 @@ class Downloads:
         while os.path.exists(path):
             filename = f"{filename[:-4]} (duplicate).pdf"
             path = os.path.join(dirpath, filename)
-        util.download_paper(paper_id=xid, path=path)
+        completed_progress = util.download_paper(paper_id=xid, path=path)
         self._paths[xid] = path
+        return completed_progress
 
     def delete(self, xid):
         path = self._paths.pop(xid, None)
@@ -611,7 +619,7 @@ class Clip:
     text: str
 
     def run(self, session):
-        util.copy_to_clipboard(self.text)
+        return util.copy_to_clipboard(self.text)
 
 
 @dataclass
@@ -641,7 +649,7 @@ class Download:
     name: str
 
     def run(self, session):
-        session.downloads.download(self.xid, self.name, self.xidv)
+        return session.downloads.download(self.xid, self.name, self.xidv)
 
 
 @dataclass
@@ -667,3 +675,13 @@ class ResumeTimer:
 
     def run(self, session):
         session.stopwatch.set_paused(False)
+
+
+def run_effects(scanner: Scanner, effects, session: Session):
+    """Run effects and feed externally observed outcomes back to the scanner."""
+    for effect in effects:
+        result = effect.run(session)
+        if isinstance(effect, Download):
+            scanner.download_finished(result)
+        elif isinstance(effect, Clip):
+            scanner.clipboard_finished(result)

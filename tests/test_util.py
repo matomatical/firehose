@@ -344,9 +344,11 @@ def test_download_paper_tolerates_unknown_content_length(
     monkeypatch.setattr(requests, "get", get)
     path = tmp_path / "paper.pdf"
 
-    util.download_paper("2607.00001", str(path))
+    completed_progress = util.download_paper("2607.00001", str(path))
 
     assert path.read_bytes() == b"%PDF body"
+    assert completed_progress.startswith("downloaded ★:")
+    assert "100%" in completed_progress
     assert not list(tmp_path.glob(".firehose-*.part"))
     assert response.closed
     assert calls == [(
@@ -391,6 +393,73 @@ def test_download_paper_cleans_partial_and_preserves_destination(
     assert path.read_bytes() == b"existing"
     assert not list(tmp_path.glob(".firehose-*.part"))
     assert response.closed
+
+
+def test_download_paper_labels_live_progress(tmp_path, monkeypatch):
+    response = _FakeDownloadResponse(
+        headers={"content-length": "4"},
+        chunks=[b"%PDF"],
+    )
+    progress_kwargs = {}
+
+    class FakeBar:
+        def __init__(self, **kwargs):
+            progress_kwargs.update(kwargs)
+            self.total = kwargs["total"]
+            self.n = 0
+            self.desc = kwargs["desc"]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+        def update(self, amount):
+            self.n += amount
+
+        def __str__(self):
+            return f"{self.desc}: 100%|bar| {self.n}/{self.total}"
+
+    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: response)
+    monkeypatch.setattr(util.tqdm, "tqdm", FakeBar)
+
+    completed_progress = util.download_paper(
+        "2607.00001", str(tmp_path / "paper.pdf")
+    )
+
+    assert progress_kwargs["desc"] == "downloading..."
+    assert progress_kwargs["total"] == 4
+    assert completed_progress == "downloaded ★: 100%|bar| 4/4"
+
+
+# -- clipboard -----------------------------------------------------------------
+
+class _FakeClipboardProcess:
+    def __init__(self, returncode):
+        self.returncode = returncode
+        self.input = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return None
+
+    def communicate(self, input):
+        self.input = input
+
+
+@pytest.mark.parametrize(("returncode", "copied"), [(0, True), (1, False)])
+def test_copy_to_clipboard_checks_process_exit_status(
+    monkeypatch, returncode, copied,
+):
+    process = _FakeClipboardProcess(returncode)
+    monkeypatch.setattr(util.sys, "platform", "darwin")
+    monkeypatch.setattr(util.subprocess, "Popen", lambda *args, **kwargs: process)
+
+    assert util.copy_to_clipboard("a title") is copied
+    assert process.input == b"a title"
 
 
 # -- scanlog event writer ------------------------------------------------------

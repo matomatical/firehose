@@ -16,7 +16,7 @@ from firehose import util
 from firehose.sample import (
     Scanner, Paper, Log, Clip, Open, MarkRead, Download, DeletePDF,
     PauseTimer, ResumeTimer, render_frame, KEY_TO_COMMAND, TRUNCATED_NOTICE,
-    Session, Scanlog, Readlog, Downloads, Stopwatch, select_papers,
+    Session, Scanlog, Readlog, Downloads, Stopwatch, select_papers, run_effects,
 )
 
 
@@ -346,6 +346,52 @@ def test_render_truncated_keeps_action_message():
     assert "saved" in frame  # feedback survives clipping
 
 
+@pytest.mark.parametrize(
+    ("copied", "detail"),
+    [(True, "copied to clipboard"), (False, "clipboard not available")],
+)
+def test_save_message_reports_clipboard_outcome(tmp_path, monkeypatch, copied, detail):
+    monkeypatch.setattr(util, "copy_to_clipboard", lambda text: copied)
+    sc = Scanner(papers(1)); sc.start()
+    session = Session(
+        scanlog=Scanlog(str(tmp_path / "scanlog.jsonl")),
+        readlog=Readlog(str(tmp_path / "readlog.txt")),
+        downloads=Downloads(str(tmp_path / "dl")),
+        stopwatch=Stopwatch(),
+    )
+
+    run_effects(sc, sc.feed("save"), session)
+
+    assert sc.state == "saved"
+    assert sc.message == f"saved ☆ ({detail})"
+
+
+def test_download_message_keeps_complete_progress_bar(tmp_path, monkeypatch):
+    completed_progress = "downloaded ★: 100%|████| 4/4 bytes"
+
+    def download(paper_id, path):
+        open(path, "w").write("PDF")
+        return completed_progress
+
+    monkeypatch.setattr(
+        util, "download_paper", download,
+    )
+    monkeypatch.setattr(util, "copy_to_clipboard", lambda text: False)
+    sc = Scanner(papers(1)); sc.start()
+    session = Session(
+        scanlog=Scanlog(str(tmp_path / "scanlog.jsonl")),
+        readlog=Readlog(str(tmp_path / "readlog.txt")),
+        downloads=Downloads(str(tmp_path / "dl")),
+        stopwatch=Stopwatch(),
+    )
+
+    effects = sc.feed("download")
+    assert sc.message == "downloading..."
+    run_effects(sc, effects, session)
+
+    assert sc.message == f"{completed_progress} (clipboard not available)"
+
+
 # -- expand command ------------------------------------------------------------
 
 def test_expand_toggles_and_emits_no_effects():
@@ -385,8 +431,11 @@ def test_effects_run_end_to_end(tmp_path, monkeypatch):
 
     monkeypatch.setattr(util, "copy_to_clipboard", lambda text: False)
     monkeypatch.setattr(util, "open_url", lambda url: False)
-    monkeypatch.setattr(util, "download_paper",
-                        lambda paper_id, path: open(path, "w").write("PDF"))
+    def download(paper_id, path):
+        open(path, "w").write("PDF")
+        return "downloaded ★: 100%|████|"
+
+    monkeypatch.setattr(util, "download_paper", download)
 
     sc = Scanner(papers(1))
     session = Session(
@@ -397,8 +446,7 @@ def test_effects_run_end_to_end(tmp_path, monkeypatch):
     )
 
     def run(effects):
-        for effect in effects:
-            effect.run(session)
+        run_effects(sc, effects, session)
 
     run(sc.start())
     for command in ["save", "remove", "pause", "pause", "download", "remove", "quit"]:
@@ -430,12 +478,10 @@ def test_failed_download_is_not_logged_or_copied(tmp_path, monkeypatch):
         downloads=Downloads(str(tmp_path / "dl")),
         stopwatch=Stopwatch(),
     )
-    for effect in sc.start():
-        effect.run(session)
+    run_effects(sc, sc.start(), session)
 
     with pytest.raises(RuntimeError, match="offline"):
-        for effect in sc.feed("download"):
-            effect.run(session)
+        run_effects(sc, sc.feed("download"), session)
 
     events = [json.loads(line)["type"] for line in scanlog_path.open()]
     assert events == ["start", "view"]

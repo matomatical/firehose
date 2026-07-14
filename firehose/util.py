@@ -318,12 +318,13 @@ def to_filename(name: str, xidv: str) -> str:
     return re.sub(r"[^\w ?+,'()\[\]\-]", "_", f"{name} [{xidv}]") + ".pdf"
 
 
-def download_paper(paper_id: str, path: str) -> None:
+def download_paper(paper_id: str, path: str) -> str:
     """Download an arXiv PDF atomically to `path`.
 
     HTTP errors and stalled transfers raise without creating or replacing the
     destination. The response is streamed to a temporary file in the same
     directory, then moved into place only after the complete body is received.
+    Returns the completed progress meter for the scanner to keep on screen.
     """
     url = f"https://arxiv.org/pdf/{paper_id}.pdf"
     temp_path = None
@@ -350,7 +351,7 @@ def download_paper(paper_id: str, path: str) -> None:
             ) as file:
                 temp_path = file.name
                 with tqdm.tqdm(
-                    desc="Download",
+                    desc="downloading...",
                     total=total,
                     unit="iB",
                     unit_scale=True,
@@ -361,9 +362,18 @@ def download_paper(paper_id: str, path: str) -> None:
                         if data:
                             bar.update(file.write(data))
 
+            # A response without Content-Length has no percentage while it is
+            # in flight. Once EOF is reached, the received byte count is the
+            # known total, so its persistent final meter can still show 100%.
+            if bar.total is None:
+                bar.total = bar.n
+            bar.desc = "downloaded ★"
+            completed_progress = str(bar)
+
         assert temp_path is not None
         os.replace(temp_path, path)
         temp_path = None
+        return completed_progress
     finally:
         if temp_path is not None:
             try:
@@ -403,7 +413,7 @@ def copy_to_clipboard(text: str) -> bool:
     try:
         with subprocess.Popen(argv, stdin=subprocess.PIPE) as proc:
             proc.communicate(input=text.encode())
-        return True
+        return proc.returncode == 0
     except (OSError, subprocess.SubprocessError):
         return False
 
