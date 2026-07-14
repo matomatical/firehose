@@ -86,7 +86,7 @@ def harvest(
             last_request_time = time.time()
             for t, record in zip(range(BATCH_SIZE), new_records):
                 batch.append(record)
-            
+
             # update progress bar
             bar.update(len(batch))
             bar.write(f"loaded {len(batch)} papers:")
@@ -96,13 +96,26 @@ def harvest(
             num_new_papers = 0
             num_got_papers = 0
             num_skipped_papers = 0
+            num_deleted_records = 0
+            num_removed_papers = 0
             for record in batch:
                 xid = record.header.identifier.removeprefix(OAI_ID_PREFIX)
+                # Deleted OAI records have a header (including their update
+                # datestamp) but no metadata. Process them before touching
+                # record.metadata, and remove any now-unavailable cached id.
+                update_date = util.to_date(record.header.datestamp)
+                if record.deleted:
+                    num_deleted_records += 1
+                    if cache.pop(xid, None) is not None:
+                        num_removed_papers += 1
+                    latest_date = update_date
+                    continue
+
                 submit_date = util.to_date(record.metadata['date'][0])
-                latest_date = util.to_date(record.header.datestamp)
                 classes = set(record.header.setSpecs)
                 if not (classes & my_classes):
                     num_skipped_papers += 1
+                    latest_date = update_date
                     continue
                 if xid not in cache:
                     num_new_papers += 1
@@ -110,32 +123,35 @@ def harvest(
                     cache[xid] = submit_date
                 else:
                     num_got_papers += 1
+                latest_date = update_date
             # print the new article statistics
-            bar.write(f"* got papers:     {num_got_papers}")
-            bar.write(f"* new papers:     {num_new_papers}")
-            bar.write(f"* skipped papers: {num_skipped_papers}")
+            bar.write(f"* got papers:      {num_got_papers}")
+            bar.write(f"* new papers:      {num_new_papers}")
+            bar.write(f"* skipped papers:  {num_skipped_papers}")
+            bar.write(f"* deleted records: {num_deleted_records}")
+            bar.write(f"* removed papers:  {num_removed_papers}")
             bar.write("* new paper dates:")
             bar.write(str(vis.vis_dates(dates=new_dates, print_counts=False)))
             bar.write(f"* new latest update date: {latest_date}")
-            
+
             if len(batch) < BATCH_SIZE:
                 break
-    except KeyboardInterrupt as e:
+    except KeyboardInterrupt:
         print("\nexiting query early.")
-        pass
     except Exception as e:
         print("exiting query due to another error:", e)
-        pass
-    bar.close()
-        
-    print("saving papers to disk...")
-    util.ensure_data_dir(paths)
-    util.save_cache(
-        path=cache_path,
-        latest_date=latest_date,
-        cache=cache,
-    )
+        raise
+    finally:
+        # Preserve all successfully processed records even when the query is
+        # interrupted or fails. Unexpected errors then continue propagating, so
+        # callers and shell scripts are not told that a partial harvest succeeded.
+        bar.close()
+        print("saving papers to disk...")
+        util.ensure_data_dir(paths)
+        util.save_cache(
+            path=cache_path,
+            latest_date=latest_date,
+            cache=cache,
+        )
 
     print("done.")
-
-

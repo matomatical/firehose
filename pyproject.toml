@@ -19,7 +19,7 @@ dependencies = [
     "sickle",
     # for sample
     "arxiv",
-    "matthewplotlib @ git+https://github.com/matomatical/matthewplotlib@v0.3.2-alpha",
+    "matthewplotlib @ git+https://github.com/matomatical/matthewplotlib@v0.3.8",
     "readchar",
     "pathvalidate",
     "requests",
