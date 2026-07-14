@@ -205,7 +205,7 @@ def select_papers(
 
       * default:        the last `n` candidates, reversed (newest first);
       * backwards=True:  the first `n` candidates, in cache order (oldest first);
-      * randomise=True:  `n` candidates drawn at random via `rng`.
+      * randomise=True:  up to `n` candidates drawn at random via `rng`.
 
     `offset`, when given, first narrows to the last `offset` candidates (paging
     back through older unread papers); `n <= 0` selects nothing. Pure: no I/O,
@@ -222,7 +222,7 @@ def select_papers(
     if backwards:
         return unread[:n]
     if randomise:
-        return rng.sample(unread, n)
+        return rng.sample(unread, min(n, len(unread)))
     return unread[-n:][::-1]
 
 
@@ -667,4 +667,3 @@ class ResumeTimer:
 
     def run(self, session):
         session.stopwatch.set_paused(False)
-
