@@ -121,8 +121,10 @@ def load_readlog(
     Load the seen-index as a {id: date} dict, plus the date of its last entry
     (None if empty). That date seeds the live appender's open group, so
     resuming a same-day session continues that group without re-reading the
-    file.
+    file. Returns an empty log and no last date when the file does not exist yet.
     """
+    if not os.path.exists(path):
+        return {}, None
     readlog = {}
     last_date = None
     with open(path, 'r') as f:
@@ -367,5 +369,4 @@ def open_url(url: str) -> bool:
         return True
     except (OSError, subprocess.SubprocessError):
         return False
-
 

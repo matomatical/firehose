@@ -148,6 +148,13 @@ def test_cache_round_trip_empty(tmp_path):
 
 # -- readlog -------------------------------------------------------------------
 
+def test_load_readlog_missing_file_is_empty(tmp_path):
+    path = tmp_path / "readlog.txt"
+
+    assert util.load_readlog(str(path)) == ({}, None)
+    assert not path.exists()  # loading remains a read-only operation
+
+
 def test_load_readlog(tmp_path):
     path = tmp_path / "readlog.txt"
     path.write_text("2025-04-23:\n2504.15284\n2025-04-24:\n2504.15286\n")
