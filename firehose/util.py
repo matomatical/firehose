@@ -24,10 +24,32 @@ OAI_API_URL = "https://oaipmh.arxiv.org/oai"
 # Config loading utilities
 
 
+def _anchor_path(path: str, base: str) -> str:
+    """Expand a leading ~ and, if the result is still relative, resolve it
+    against `base`."""
+    path = os.path.expanduser(path)
+    if not os.path.isabs(path):
+        path = os.path.join(base, path)
+    return path
+
+
 def load_config(path: str = CONFIG_PATH) -> dict:
-    """Parse TOML config file."""
+    """Parse the TOML config file.
+
+    Relative `[paths]` values (data, downloads) are anchored to the config
+    file's own directory, so firehose reads/writes the same data no matter
+    which directory it is invoked from. (The `--data-dir`/`--download-dir` CLI
+    overrides are left as given, i.e. relative to the current directory, since
+    those are typed per-invocation in a shell.)
+    """
     with open(path, "rb") as f:
-        return tomllib.load(f)
+        config = tomllib.load(f)
+    base = os.path.dirname(os.path.abspath(path))
+    paths = config.get("paths", {})
+    for key in ("data", "downloads"):
+        if key in paths:
+            paths[key] = _anchor_path(paths[key], base)
+    return config
 
 
 def data_paths(

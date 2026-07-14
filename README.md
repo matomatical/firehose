@@ -139,13 +139,18 @@ easiest way to start is to edit the one that's already there.
   (Note: Changing this list invalidates your cache and requires you delete it
   and re-run `firehose harvest`, see below).
 
-* `paths.data` controls where the index and logs live.
+* `paths.data` controls where the index and logs live. A relative path is
+  resolved from the directory holding `config.toml`, so firehose finds the
+  same data wherever you run it from.
 
-  Can be overridden at run-time with `--data-dir`.
+  Can be overridden at run-time with `--data-dir` (resolved from the current
+  directory).
 
-* `paths.downloads` controls where PDFs are downloaded.
-  
-  Can be overridden at run-time with `--download-dir`.
+* `paths.downloads` controls where PDFs are downloaded. A relative path is
+  resolved from the directory holding `config.toml`.
+
+  Can be overridden at run-time with `--download-dir` (resolved from the
+  current directory).
 
 * `scan.modern_cutoff` is a backstop for scanning. If you never want to see
   papers before the date you started scanning, set this.

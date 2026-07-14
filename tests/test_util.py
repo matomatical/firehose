@@ -40,6 +40,35 @@ def test_data_paths_expands_user():
     assert q.data_dir == os.path.expanduser("~/e")
 
 
+# load_config anchors relative [paths] values to the config file's own
+# directory (not the CWD), so firehose reads/writes the same data wherever it
+# is invoked from; ~ and absolute paths are left as the user meant them.
+
+def test_load_config_anchors_relative_paths_to_config_dir(tmp_path):
+    cfg = tmp_path / "config.toml"
+    cfg.write_text('[paths]\ndata = "data"\ndownloads = "dl"\n')
+    config = util.load_config(str(cfg))
+    assert config["paths"]["data"] == str(tmp_path / "data")
+    assert config["paths"]["downloads"] == str(tmp_path / "dl")
+
+
+def test_load_config_leaves_absolute_and_user_paths(tmp_path):
+    cfg = tmp_path / "config.toml"
+    cfg.write_text('[paths]\ndata = "/var/data"\ndownloads = "~/dl"\n')
+    config = util.load_config(str(cfg))
+    assert config["paths"]["data"] == "/var/data"
+    assert config["paths"]["downloads"] == os.path.expanduser("~/dl")
+
+
+def test_load_config_tolerates_missing_paths_keys(tmp_path):
+    # test_vis smoke configs omit downloads; a bare config must not KeyError.
+    cfg = tmp_path / "config.toml"
+    cfg.write_text('[paths]\ndata = "data"\n')
+    config = util.load_config(str(cfg))
+    assert config["paths"]["data"] == str(tmp_path / "data")
+    assert "downloads" not in config["paths"]
+
+
 # -- cache save/load round-trip + on-disk format -------------------------------
 
 # The cache (data/arxiv.txt) is firehose's master paper index, so a save/load

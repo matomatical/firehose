@@ -3,12 +3,14 @@
 
 [paths]
 # Where firehose keeps its data files (arxiv.txt, readlog.txt, scanlog.jsonl).
-# A relative path resolves from the directory firehose runs in.
-# Override for a single run with --data-dir.
+# A relative path resolves from the directory holding this config file, so
+# firehose finds the same data wherever it is run from; ~ is expanded.
+# Override for a single run with --data-dir (resolved from the current dir).
 data = "data"
 # Where grabbed PDFs are saved (gitignored; filed under <YYYY-MM>/ subdirs).
-# A relative path resolves from the directory firehose runs in; ~ is expanded.
-# Override for a single run with --download-dir.
+# A relative path resolves from the directory holding this config file; ~ is
+# expanded.
+# Override for a single run with --download-dir (resolved from the current dir).
 downloads = "downloads"
 
 [scan]
