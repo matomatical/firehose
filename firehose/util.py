@@ -163,15 +163,40 @@ def save_cache(
     path: str,
     latest_date: datetime.date,
     cache: dict[str, datetime.date],
-):
+) -> None:
     """
     Write the {id: date} paper cache to disk: the "latest datestamp" watermark
-    on the first line, then the bare ids sorted by date and grouped.
+    on the first line, then the bare ids sorted by date and grouped. The new
+    contents are flushed to a sibling temporary file before atomically replacing
+    the previous cache, which remains intact if serialization is interrupted.
     """
     sorted_cache = sorted((date, xid) for xid, date in cache.items())
-    with open(path, 'w') as f:
-        f.write(f"latest datestamp: {to_datestamp(latest_date)}\n")
-        _write_grouped(f, tqdm.tqdm(sorted_cache, ncols=80))
+    parent = os.path.dirname(os.path.abspath(path))
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=parent,
+            prefix=".firehose-cache-",
+            suffix=".tmp",
+            delete=False,
+        ) as f:
+            temp_path = f.name
+            f.write(f"latest datestamp: {to_datestamp(latest_date)}\n")
+            _write_grouped(f, tqdm.tqdm(sorted_cache, ncols=80))
+            f.flush()
+            os.fsync(f.fileno())
+
+        assert temp_path is not None
+        os.replace(temp_path, path)
+        temp_path = None
+    finally:
+        if temp_path is not None:
+            try:
+                os.remove(temp_path)
+            except FileNotFoundError:
+                pass
 
 
 def _write_grouped(f, dated_ids):

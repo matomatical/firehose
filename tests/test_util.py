@@ -101,6 +101,29 @@ def test_save_cache_writes_expected_on_disk_format(tmp_path):
         "2508.00001",
         "2508.00002",
     ]
+    assert not list(tmp_path.glob(".firehose-cache-*.tmp"))
+
+
+def test_save_cache_interruption_preserves_previous_file(tmp_path, monkeypatch):
+    path = tmp_path / "arxiv.txt"
+    previous = "latest datestamp: 2026-03-04\n2026-03-04:\n2603.00001\n"
+    path.write_text(previous)
+
+    def fail_mid_write(f, dated_ids):
+        f.write("partial replacement\n")
+        raise RuntimeError("interrupted")
+
+    monkeypatch.setattr(util, "_write_grouped", fail_mid_write)
+
+    with pytest.raises(RuntimeError, match="interrupted"):
+        util.save_cache(
+            str(path),
+            datetime.date(2026, 3, 5),
+            {"2603.00002": datetime.date(2026, 3, 5)},
+        )
+
+    assert path.read_text() == previous
+    assert not list(tmp_path.glob(".firehose-cache-*.tmp"))
 
 
 def test_cache_round_trip_preserves_entries_and_latest_date(tmp_path):
