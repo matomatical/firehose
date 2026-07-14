@@ -357,9 +357,11 @@ class Scanner:
         self.states[self.index] = "downloaded"
         self.message = "downloaded ★"
         return [
+            # Commit the external effect before recording/copying success. If
+            # the download raises, the remaining effects are never run.
+            Download(self.xid, self.current.xidv, self.current.name),
             Log({"type": "download", "xid": self.xid}),
             Clip(f"- {self.current.name}\n"),
-            Download(self.xid, self.current.xidv, self.current.name),
         ]
 
     def _remove(self):
@@ -665,5 +667,4 @@ class ResumeTimer:
 
     def run(self, session):
         session.stopwatch.set_paused(False)
-
 

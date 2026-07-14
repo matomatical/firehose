@@ -9,6 +9,9 @@ import json
 import os
 import types
 
+import pytest
+import requests
+
 from firehose import util
 
 
@@ -275,6 +278,96 @@ def test_to_filename_sanitizes_slash_in_old_style_id():
 def test_to_filename_sanitizes_colon_in_title():
     assert util.to_filename("Smith2026 Title: A Study", "2508.09137v1") \
         == "Smith2026 Title_ A Study [2508_09137v1].pdf"
+
+
+# -- PDF download --------------------------------------------------------------
+
+class _FakeDownloadResponse:
+    def __init__(self, *, headers=None, chunks=(), status_error=None):
+        self.headers = headers or {}
+        self.chunks = chunks
+        self.status_error = status_error
+        self.closed = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.closed = True
+
+    def raise_for_status(self):
+        if self.status_error is not None:
+            raise self.status_error
+
+    def iter_content(self, chunk_size):
+        assert chunk_size == 64 * 1024
+        for chunk in self.chunks:
+            if isinstance(chunk, BaseException):
+                raise chunk
+            yield chunk
+
+
+@pytest.mark.parametrize("headers", [{}, {"content-length": "not-a-number"}])
+def test_download_paper_tolerates_unknown_content_length(
+    tmp_path, monkeypatch, headers,
+):
+    response = _FakeDownloadResponse(headers=headers, chunks=[b"%PDF", b" body"])
+    calls = []
+
+    def get(url, **kwargs):
+        calls.append((url, kwargs))
+        return response
+
+    monkeypatch.setattr(requests, "get", get)
+    path = tmp_path / "paper.pdf"
+
+    util.download_paper("2607.00001", str(path))
+
+    assert path.read_bytes() == b"%PDF body"
+    assert not list(tmp_path.glob(".firehose-*.part"))
+    assert response.closed
+    assert calls == [(
+        "https://arxiv.org/pdf/2607.00001.pdf",
+        {"stream": True, "timeout": util.DOWNLOAD_TIMEOUT},
+    )]
+
+
+def test_download_paper_rejects_http_error_without_creating_file(
+    tmp_path, monkeypatch,
+):
+    response = _FakeDownloadResponse(
+        headers={"content-length": "3"},
+        chunks=[b"ERR"],
+        status_error=requests.HTTPError("404 Not Found"),
+    )
+    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: response)
+    path = tmp_path / "paper.pdf"
+
+    with pytest.raises(requests.HTTPError, match="404"):
+        util.download_paper("missing", str(path))
+
+    assert not path.exists()
+    assert not list(tmp_path.glob(".firehose-*.part"))
+    assert response.closed
+
+
+def test_download_paper_cleans_partial_and_preserves_destination(
+    tmp_path, monkeypatch,
+):
+    response = _FakeDownloadResponse(chunks=[
+        b"partial",
+        requests.ConnectionError("connection lost"),
+    ])
+    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: response)
+    path = tmp_path / "paper.pdf"
+    path.write_bytes(b"existing")
+
+    with pytest.raises(requests.ConnectionError, match="connection lost"):
+        util.download_paper("2607.00001", str(path))
+
+    assert path.read_bytes() == b"existing"
+    assert not list(tmp_path.glob(".firehose-*.part"))
+    assert response.closed
 
 
 # -- scanlog event writer ------------------------------------------------------

@@ -9,6 +9,7 @@ import datetime
 import json
 import random
 
+import pytest
 import readchar
 
 from firehose import util
@@ -171,9 +172,9 @@ def test_download_then_remove_deletes_pdf():
     fx = sc.feed("download")
     assert sc.states[0] == "downloaded"
     assert fx == [
+        Download(sc.xid, sc.current.xidv, sc.current.name),
         Log({"type": "download", "xid": sc.xid}),
         Clip(f"- {sc.current.name}\n"),
-        Download(sc.xid, sc.current.xidv, sc.current.name),
     ]
     fx = sc.feed("remove")
     assert sc.states[0] == "none"
@@ -395,6 +396,36 @@ def test_effects_run_end_to_end(tmp_path, monkeypatch):
     ]
     assert list(dl.rglob("*.pdf")) == []          # PDF downloaded then deleted
     assert list(util.load_readlog(str(readlog_path))[0]) == ["2601.00001"]  # logged once
+
+
+def test_failed_download_is_not_logged_or_copied(tmp_path, monkeypatch):
+    scanlog_path = tmp_path / "scanlog.jsonl"
+    copied = []
+
+    def fail_download(paper_id, path):
+        raise RuntimeError("offline")
+
+    monkeypatch.setattr(util, "download_paper", fail_download)
+    monkeypatch.setattr(util, "copy_to_clipboard", lambda text: copied.append(text))
+
+    sc = Scanner(papers(1))
+    session = Session(
+        scanlog=Scanlog(str(scanlog_path)),
+        readlog=Readlog(str(tmp_path / "readlog.txt")),
+        downloads=Downloads(str(tmp_path / "dl")),
+        stopwatch=Stopwatch(),
+    )
+    for effect in sc.start():
+        effect.run(session)
+
+    with pytest.raises(RuntimeError, match="offline"):
+        for effect in sc.feed("download"):
+            effect.run(session)
+
+    events = [json.loads(line)["type"] for line in scanlog_path.open()]
+    assert events == ["start", "view"]
+    assert copied == []
+    assert list((tmp_path / "dl").rglob("*.pdf")) == []
 
 
 # -- session sinks: Readlog / Downloads ----------------------------------------

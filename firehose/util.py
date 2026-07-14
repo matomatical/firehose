@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import tomllib
 import types
 
@@ -18,6 +19,11 @@ CONFIG_PATH = "config.toml"
 
 # arXiv's OAI-PMH endpoint, shared by `harvest` and `classes`.
 OAI_API_URL = "https://oaipmh.arxiv.org/oai"
+
+# Connect and per-chunk read timeouts for PDF downloads, in seconds. The read
+# timeout is not a cap on the whole download; it bounds how long the server may
+# stop sending bytes before Requests raises.
+DOWNLOAD_TIMEOUT = (10, 60)
 
 
 # # # 
@@ -287,26 +293,58 @@ def to_filename(name: str, xidv: str) -> str:
     return re.sub(r"[^\w ?+,'()\[\]\-]", "_", f"{name} [{xidv}]") + ".pdf"
 
 
-def download_paper(paper_id: str, path: str):
-    # get download iterator
+def download_paper(paper_id: str, path: str) -> None:
+    """Download an arXiv PDF atomically to `path`.
+
+    HTTP errors and stalled transfers raise without creating or replacing the
+    destination. The response is streamed to a temporary file in the same
+    directory, then moved into place only after the complete body is received.
+    """
     url = f"https://arxiv.org/pdf/{paper_id}.pdf"
-    response = requests.get(url, stream=True)
-    total = int(response.headers.get('content-length', 0))
-    bar = tqdm.tqdm(
-        desc="Download",
-        total=int(response.headers.get('content-length', None)),
-        unit='iB',
-        unit_scale=True,
-        unit_divisor=1024,
-        ncols=80,
-    )
-    # open file (the caller ensures the path does not already exist)
-    with open(path, 'wb') as file:
-        # stream the data into the file
-        for data in response.iter_content(chunk_size=1024):
-            size = file.write(data)
-            bar.update(size)
-    bar.close()
+    temp_path = None
+    try:
+        with requests.get(
+            url,
+            stream=True,
+            timeout=DOWNLOAD_TIMEOUT,
+        ) as response:
+            response.raise_for_status()
+            try:
+                content_length = response.headers.get("content-length")
+                total = int(content_length) if content_length is not None else None
+            except (TypeError, ValueError):
+                total = None
+
+            parent = os.path.dirname(os.path.abspath(path))
+            with tempfile.NamedTemporaryFile(
+                mode="wb",
+                dir=parent,
+                prefix=".firehose-",
+                suffix=".part",
+                delete=False,
+            ) as file:
+                temp_path = file.name
+                with tqdm.tqdm(
+                    desc="Download",
+                    total=total,
+                    unit="iB",
+                    unit_scale=True,
+                    unit_divisor=1024,
+                    ncols=80,
+                ) as bar:
+                    for data in response.iter_content(chunk_size=64 * 1024):
+                        if data:
+                            bar.update(file.write(data))
+
+        assert temp_path is not None
+        os.replace(temp_path, path)
+        temp_path = None
+    finally:
+        if temp_path is not None:
+            try:
+                os.remove(temp_path)
+            except FileNotFoundError:
+                pass
 
 
 # # # 
@@ -369,4 +407,3 @@ def open_url(url: str) -> bool:
         return True
     except (OSError, subprocess.SubprocessError):
         return False
-
