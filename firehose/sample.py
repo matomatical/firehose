@@ -78,6 +78,7 @@ def sample(
     """
     config = util.load_config(config_path)
     paths = util.data_paths(config, data_dir=data_dir)
+    util.ensure_data_dir(paths)  # readlog/scanlog get written during the scan
     download_dir = download_dir or config["paths"]["downloads"]
 
     # load cached headers with overlapping classes

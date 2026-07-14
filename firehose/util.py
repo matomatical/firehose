@@ -58,18 +58,24 @@ def data_paths(
     data_dir: str | None = None,
 ) -> types.SimpleNamespace:
     """
-    Paths for data, with optional override. Ensures the data directory exists
-    (it is gitignored, so it's absent on a fresh clone) so the first harvest or
-    scan can write into it.
+    Compute the data file paths, with an optional data-dir override; ~ is
+    expanded. Pure: it does not touch the filesystem. Writers (harvest, sample)
+    call ensure_data_dir first, since the data dir is gitignored and so absent
+    on a fresh clone; readers (vis) don't need it to exist.
     """
     data_dir = os.path.expanduser(data_dir or config["paths"]["data"])
-    os.makedirs(data_dir, exist_ok=True)
     return types.SimpleNamespace(
         data_dir=data_dir,
         cache=os.path.join(data_dir, "arxiv.txt"),
         readlog=os.path.join(data_dir, "readlog.txt"),
         scanlog=os.path.join(data_dir, "scanlog.jsonl"),
     )
+
+
+def ensure_data_dir(paths: types.SimpleNamespace) -> None:
+    """Create the data directory (from data_paths) if absent, so a writer can
+    file into it. Separated from data_paths so path computation stays pure."""
+    os.makedirs(paths.data_dir, exist_ok=True)
 
 
 # # #

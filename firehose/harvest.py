@@ -30,7 +30,8 @@ def harvest(
     # load subscribed classes and resolve data paths from config
     config = util.load_config(config_path)
     my_classes = set(config["arxiv"]["categories"])
-    cache_path = util.data_paths(config, data_dir=data_dir).cache
+    paths = util.data_paths(config, data_dir=data_dir)
+    cache_path = paths.cache
 
     # configure client
     sickle = Sickle(util.OAI_API_URL)
@@ -128,6 +129,7 @@ def harvest(
     bar.close()
         
     print("saving papers to disk...")
+    util.ensure_data_dir(paths)
     util.save_cache(
         path=cache_path,
         latest_date=latest_date,
