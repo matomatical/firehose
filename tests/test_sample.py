@@ -8,6 +8,8 @@ No terminal, network, or clipboard.
 import datetime
 import json
 import random
+import re
+import textwrap
 
 import pytest
 import readchar
@@ -344,6 +346,54 @@ def test_render_truncated_keeps_action_message():
     frame = render_frame(sc, 0.0, rows=12)
     assert TRUNCATED_NOTICE in frame
     assert "saved" in frame  # feedback survives clipping
+
+
+def test_render_wraps_long_comment():
+    # a long comment must be wrapped like the abstract, so it occupies its true
+    # number of display rows and the frame's line count stays honest (otherwise
+    # a long one-line comment undercounts and throws off truncation).
+    p = mkpaper(1)
+    p.comment = "This is a lengthy comment. " * 10
+    sc = Scanner([p]); sc.start()
+    frame = render_frame(sc, 0.0, rows=None)
+    wrapped = textwrap.fill(f"comment: {p.comment}", width=80)
+    assert "\n" in wrapped              # the fixture is genuinely multi-line
+    assert wrapped in frame             # emitted wrapped, verbatim
+    assert f"comment: {p.comment}" not in frame  # never emitted as one line
+
+
+def _strip_ansi(s: str) -> str:
+    return re.sub(r"\033\[[0-9;]*[A-Za-z]", "", s)
+
+
+def test_render_wraps_many_categories_on_visible_width():
+    # the id + categories line must wrap on visible width (control codes not
+    # counted), and the id must sit outside the italic (categories only).
+    p = mkpaper(1)
+    p.categories = ["cs.LG", "cs.AI", "cs.CL", "stat.ML", "math.OC",
+                    "cs.NE", "cs.CV", "eess.SP", "cs.RO"]
+    sc = Scanner([p]); sc.start()
+    frame = render_frame(sc, 0.0, rows=None)
+    id_lines = [ln for ln in frame.split("\n") if p.entry_id in ln]
+    # the id anchors the first physical line; the categories spill onto more
+    assert len(id_lines) == 1 and id_lines[0].startswith(p.entry_id)
+    assert "\033[3m" in id_lines[0] and not id_lines[0].startswith("\033[3m")
+    # every physical line stays within 80 columns once styling is stripped
+    assert all(len(_strip_ansi(ln)) <= 80 for ln in frame.split("\n"))
+    # more than one physical row is devoted to the category run
+    cat_rows = [ln for ln in frame.split("\n")
+                if any(c in _strip_ansi(ln) for c in ("eess.SP", "cs.RO"))]
+    assert cat_rows and all(p.entry_id not in ln for ln in cat_rows)
+
+
+def test_render_truncation_accounts_for_wrapped_comment():
+    # with a comment long enough to overflow, the frame must still clip to the
+    # row budget rather than trusting a bogus single-line count.
+    p = mkpaper(1)
+    p.comment = "Accepted at Some Conference 2026. " * 8
+    sc = Scanner([p]); sc.start()
+    frame = render_frame(sc, 0.0, rows=12)
+    assert _rows(frame) <= 11
 
 
 @pytest.mark.parametrize(

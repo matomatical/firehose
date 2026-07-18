@@ -457,11 +457,23 @@ def render_frame(scanner, elapsed: float, *, rows: int | None = None):
     (used by tests / non-interactive callers).
     """
     p = scanner.current
-    cats = ', '.join("\033[3m" + str(c) + "\033[0m" for c in p.categories)
     authors = ', '.join(str(a) for a in p.authors)
     seen = scanner.nseen + 1
     average = elapsed / seen if seen > 0 else 0.0
     glyph = GLYPHS[scanner.state]
+
+    # id + categories, wrapped on visible width: fill the *plain* text (so the
+    # SGR codes never inflate the measured width), counting the id via
+    # initial_indent, then wrap the category portion in a single italic pair —
+    # italic persists across the internal newlines, as the authors block does.
+    id_prefix = f"{p.entry_id} "
+    wrapped_cats = textwrap.fill(
+        ', '.join(str(c) for c in p.categories),
+        width=80,
+        initial_indent=id_prefix,
+        subsequent_indent="",
+    )                                       # "" when there are no categories
+    cats_line = id_prefix + "\033[3m" + wrapped_cats[len(id_prefix):] + "\033[0m"
 
     # header: the scanning essentials, kept whenever the frame is clipped
     header = [
@@ -469,14 +481,14 @@ def render_frame(scanner, elapsed: float, *, rows: int | None = None):
         f"{mp.progress((scanner.index + 1) / scanner.n, width=60)} {glyph}",
         f"{datetime.timedelta(seconds=int(elapsed))} ({average:.2f} seconds/paper)"
         + (" — PAUSED (space to resume)" if scanner.paused else ""),
-        f"{p.entry_id} {cats}",
+        cats_line,
         f"published: {p.published} updated: {p.updated}",
         "\033[1m" + textwrap.fill(p.title, width=80) + "\033[0m",
         "\033[2m" + textwrap.fill(authors, width=80) + "\033[0m",
     ]
     body = [*header, textwrap.fill(p.summary, width=80), ""]
     if p.comment is not None:
-        body.append(f"comment: {p.comment}")
+        body.append(textwrap.fill(f"comment: {p.comment}", width=80))
     body.append("")
     if scanner.message:
         body.append(scanner.message)
@@ -495,7 +507,7 @@ def render_frame(scanner, elapsed: float, *, rows: int | None = None):
     tail = ([scanner.message] if scanner.message else []) + [TRUNCATED_NOTICE]
     main = [*header, textwrap.fill(p.summary, width=80)]
     if p.comment is not None:
-        main += ["", f"comment: {p.comment}"]
+        main += ["", textwrap.fill(f"comment: {p.comment}", width=80)]
     main_rows = "\n".join(main).split("\n")
     keep = max(0, budget - len(tail))
     return prefix + "\n".join(main_rows[:keep] + tail)
