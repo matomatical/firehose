@@ -3,10 +3,10 @@ import collections
 import datetime
 import time
 import typing
-from dataclasses import dataclass
 
 import matthewplotlib as mp
 
+from firehose import stats
 from firehose import util
 
 
@@ -58,7 +58,7 @@ def unread(
     print(f"loaded {len(read)} already-read papers")
 
     cutoff = config["scan"]["modern_cutoff"] if modern else None
-    unread_dates = select_unread_dates(cache, read, cutoff=cutoff)
+    unread_dates = stats.select_unread_dates(cache, read, cutoff=cutoff)
     print(f"found {len(unread_dates)} unread papers")
 
     print("printing calendar...")
@@ -129,17 +129,14 @@ def reading_calendar(
     if mode == "read-date":
         read_dates = list(readlog.values())
         vis = vis_dates(read_dates)
-    
+
     elif mode == "submit-date":
-        submit_dates = [ cache[xid] for xid in readlog if xid in cache ]
-        vis = vis_dates(submit_dates)
+        vis = vis_dates(stats.read_submit_dates(readlog, cache))
 
     elif mode == "proportion":
-        submit_dates = [ cache[xid] for xid in readlog if xid in cache ]
-        all_dates = list(cache.values())
         vis = vis_dates(
-            dates=submit_dates,
-            all_dates=all_dates,
+            dates=stats.read_submit_dates(readlog, cache),
+            all_dates=list(cache.values()),
         )
 
     print(vis)
@@ -257,7 +254,7 @@ def scan_time(
     events = util.load_scanlog(path=paths.scanlog)
     print(f"loaded {len(events)} events")
 
-    summary = summarise_scan_time(events)
+    summary = stats.summarise_scan_time(events)
     if not summary.days:
         print("no scans recorded yet.")
         return
@@ -340,23 +337,6 @@ def _vis_month_grid(norm_data: dict[datetime.date, float]) -> mp.plot:
     return mp.wrap(*month_plots)
 
 
-def select_unread_dates(
-    cache: dict[str, datetime.date],
-    read: set[str],
-    cutoff: datetime.date | None = None,
-) -> list[datetime.date]:
-    """
-    Submission dates of the unread papers in the cache: those whose id is not in
-    `read` and (when a `cutoff` is given) dated after it. Pure — the data-shaping
-    behind the `unread` command, mirroring sample.select_papers' filter without
-    its windowing (no n / backwards / randomise / offset). Order follows cache.
-    """
-    return [
-        date for xid, date in cache.items()
-        if xid not in read and (cutoff is None or date > cutoff)
-    ]
-
-
 def vis_dates(
     dates: list[datetime.date],
     all_dates: None | list[datetime.date] = None,
@@ -375,17 +355,10 @@ def vis_dates(
     if len(counts) == 0:
         return mp.text("(no dates)")
 
-    # normalise counts
-    if all_dates is None:
-        max_count = max(counts.values())
-        norm_data = {date: count/max_count for date, count in counts.items()}
-    else:
-        total_counts = collections.Counter(all_dates)
-        norm_data = {
-            date: counts.get(date, 0) / total_counts[date]
-            for date in total_counts.keys()
-        }
-
+    norm_data = stats.normalise_date_counts(
+        counts,
+        total_counts=None if all_dates is None else collections.Counter(all_dates),
+    )
     calendar_plot = _vis_month_grid(norm_data)
     if print_counts:
         if len(datelines) > 50:
@@ -407,17 +380,15 @@ def vis_all(
 ) -> mp.plot:
     # batch and count proportions
     read_xids = set(read_xids)
-    proportions = []
-    for i in range(0, len(all_xids), batch_size):
-        batch = set(all_xids[i:i+batch_size])
-        batch_read = batch & read_xids
-        proportions.append(len(batch_read)/len(batch))
+    proportions = stats.batch_read_proportions(
+        all_xids, read_xids, batch_size,
+    )
 
     # statistics
     num_batches = len(proportions)
     batches_complete = sum(p == 1 for p in proportions)
     total_progress = len(read_xids) / len(all_xids)
-    
+
     # generate plots
     plot = mp.vstack(
         mp.wrap(*[
@@ -439,116 +410,7 @@ def vis_all(
 
 
 # # #
-# Scan-time analytics (pure core)
-#
-# `scan_time` shells around these. They reduce a flat scanlog event list (from
-# util.load_scanlog) into per-day and total dwell figures, with no I/O. The
-# model mirrors sample.Stopwatch / sample's on-screen seconds/paper: time is
-# wall-clock between consecutive events, paused spans excluded, and "papers"
-# counts the distinct ids seen.
-
-
-@dataclass
-class DayStats:
-    """One day's scanning: sessions run, distinct papers seen, active seconds."""
-    date: datetime.date
-    sessions: int
-    papers: int
-    seconds: float
-
-    @property
-    def seconds_per_paper(self) -> float:
-        return self.seconds / self.papers if self.papers else 0.0
-
-
-@dataclass
-class ScanTimeSummary:
-    """Per-day breakdown plus the grand totals across every session."""
-    days: list[DayStats]
-    sessions: int
-    papers: int
-    seconds: float
-
-    @property
-    def seconds_per_paper(self) -> float:
-        return self.seconds / self.papers if self.papers else 0.0
-
-
-def split_sessions(events: list[dict]) -> list[list[dict]]:
-    """
-    Group a flat event list into sessions. A session opens on a "start" event
-    and runs to its "end"; a fresh "start" with no intervening "end" (a crash
-    mid-session) defensively closes the previous one, and a trailing run with no
-    "end" yet (a session in progress) is still returned.
-    """
-    sessions = []
-    current = []
-    for event in events:
-        if event.get("type") == "start" and current:
-            sessions.append(current)
-            current = []
-        current.append(event)
-        if event.get("type") == "end":
-            sessions.append(current)
-            current = []
-    if current:
-        sessions.append(current)
-    return sessions
-
-
-def session_active_seconds(events: list[dict]) -> float:
-    """
-    Active wall-clock seconds in one session: the gaps between consecutive
-    events summed, but a gap that opens on a "pause" event (idle until the
-    "resume") is dropped. This matches sample.Stopwatch, which only stops the
-    clock for explicit pauses.
-    """
-    total = 0.0
-    paused = False
-    for before, after in zip(events, events[1:]):
-        if before.get("type") == "pause":
-            paused = True
-        elif before.get("type") == "resume":
-            paused = False
-        if not paused:
-            t0 = datetime.datetime.fromisoformat(before["t"])
-            t1 = datetime.datetime.fromisoformat(after["t"])
-            total += (t1 - t0).total_seconds()
-    return total
-
-
-def summarise_scan_time(events: list[dict]) -> ScanTimeSummary:
-    """
-    Reduce a flat scanlog event list to a ScanTimeSummary: per-day DayStats
-    (sorted by date, each session attributed to the day it began) and the grand
-    totals. Distinct papers and active seconds are summed across sessions, so a
-    paper re-viewed in a later session counts once per session (as the live
-    seconds/paper does).
-    """
-    by_day: dict[datetime.date, DayStats] = {}
-    total_sessions = 0
-    for session in split_sessions(events):
-        if not session:
-            continue
-        total_sessions += 1
-        day = datetime.datetime.fromisoformat(session[0]["t"]).date()
-        papers = len({
-            e["xid"] for e in session if e.get("type") == "view"
-        })
-        seconds = session_active_seconds(session)
-        stats = by_day.get(day)
-        if stats is None:
-            stats = by_day[day] = DayStats(day, 0, 0, 0.0)
-        stats.sessions += 1
-        stats.papers += papers
-        stats.seconds += seconds
-    days = [by_day[day] for day in sorted(by_day)]
-    return ScanTimeSummary(
-        days=days,
-        sessions=total_sessions,
-        papers=sum(d.papers for d in days),
-        seconds=sum(d.seconds for d in days),
-    )
+# Scan-time rendering (the analytics core lives in stats.py)
 
 
 def _fmt_hms(seconds: float) -> str:
@@ -562,7 +424,7 @@ def _scan_time_row(
     return f"{label:<10} {sessions:>8} {papers:>7} {_fmt_hms(seconds):>9} {per_paper:>8.2f}s"
 
 
-def render_scan_time(summary: ScanTimeSummary) -> str:
+def render_scan_time(summary: stats.ScanTimeSummary) -> str:
     """Format a ScanTimeSummary as a plain-text table with a totals row."""
     header = f"{'date':<10} {'sessions':>8} {'papers':>7} {'time':>9} {'s/paper':>9}"
     lines = [header]
