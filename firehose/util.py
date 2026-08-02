@@ -75,6 +75,8 @@ def data_paths(
         cache=os.path.join(data_dir, "arxiv.txt"),
         readlog=os.path.join(data_dir, "readlog.txt"),
         scanlog=os.path.join(data_dir, "scanlog.jsonl"),
+        mirror=os.path.join(data_dir, "metadata"),
+        index=os.path.join(data_dir, "index.txt"),
     )
 
 
