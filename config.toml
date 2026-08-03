@@ -18,7 +18,7 @@ downloads = "downloads"
 # Papers submitted on or before this date are treated as "old" and dropped by
 # the default `sample` scan (`sample --no-modern` keeps them); roughly when I
 # started using firehose. Written as a bare date -- TOML parses it as a date.
-modern_cutoff = 2025-04-15
+modern_cutoff = 2024-12-31
 
 [server]
 # Client side: when `url` is set, every command queries that firehose server
