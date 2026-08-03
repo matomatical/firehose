@@ -1,7 +1,5 @@
 import sys
 
-from sickle import Sickle
-
 from firehose import util
 
 
@@ -13,6 +11,8 @@ def classes():
     Run this on the rare occasion you want to look up a setSpec or check whether
     arXiv has added a category, then edit config.toml by hand.
     """
+    from sickle import Sickle   # deferred: the CLI imports this module always
+
     sickle = Sickle(util.OAI_API_URL)
     # dict dedupes the duplicate setSpecs arXiv's ListSets returns (e.g. gr-qc)
     catalog = sorted({s.setSpec: s.setName for s in sickle.ListSets()}.items())

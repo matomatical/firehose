@@ -95,6 +95,11 @@ def _configure_mirror(monkeypatch, tmp_path, records, expect_identify):
             return iter(records)
 
     monkeypatch.setattr(harvest_module, "Sickle", FakeSickle)
+    # a patched Sickle stops _load_sickle importing the real library, so the
+    # exception the except clause names needs patching in too
+    monkeypatch.setattr(
+        harvest_module, "NoRecordsMatch", type("NoRecordsMatch", (Exception,), {}),
+    )
     monkeypatch.setattr(harvest_module, "BATCH_SIZE", len(records) + 1)
     monkeypatch.setattr(harvest_module.time, "sleep", lambda _: None)
     return str(config_path), tmp_path / "data"

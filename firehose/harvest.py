@@ -3,8 +3,6 @@ import itertools
 import os
 import time
 
-from sickle import Sickle
-from sickle.oaiexceptions import NoRecordsMatch
 import tqdm
 
 from firehose import arxivraw
@@ -15,6 +13,21 @@ from firehose import util
 
 MAX_RPS = 1/3
 BATCH_SIZE = 3_500
+
+# The OAI client library is imported on first use rather than here: this
+# module is imported by the CLI on every command, and only `mirror` (a
+# server-side job) actually harvests.
+Sickle = None
+NoRecordsMatch = None
+
+
+def _load_sickle():
+    global Sickle, NoRecordsMatch
+    if Sickle is None:
+        from sickle import Sickle as sickle_client
+        from sickle.oaiexceptions import NoRecordsMatch as no_records_match
+        Sickle = sickle_client
+        NoRecordsMatch = no_records_match
 
 
 def mirror(
@@ -32,6 +45,7 @@ def mirror(
     paths = util.data_paths(config, data_dir=data_dir)
     util.ensure_data_dir(paths)
     os.makedirs(paths.mirror, exist_ok=True)
+    _load_sickle()
 
     # configure client; retries ride out transient 503s (the server sets
     # Retry-After) so long unattended runs survive them. The generous read
