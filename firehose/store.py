@@ -21,10 +21,12 @@ deliberately unrestricted). In remote mode the server's subscription
 applies.
 """
 
+import contextlib
 import datetime
 import json
 import os
 import random
+import threading
 
 import httpx
 
@@ -263,18 +265,20 @@ class RemoteStore:
     """
 
     def __init__(self, url: str, client: httpx.Client | None = None):
+        self._url = url
         self._client = client or httpx.Client(
             base_url=url, timeout=30.0, follow_redirects=True,
         )
 
     def _get(self, path: str, **params):
-        response = self._client.get(
-            path,
-            params={
-                key: value for key, value in params.items()
-                if value is not None
-            },
-        )
+        with _notice_if_slow(f"waiting on the server ({self._url}{path})..."):
+            response = self._client.get(
+                path,
+                params={
+                    key: value for key, value in params.items()
+                    if value is not None
+                },
+            )
         response.raise_for_status()
         return response.json()
 
@@ -309,7 +313,10 @@ class RemoteStore:
 
     def get_paper(self, xid: str) -> Paper | None:
         """One paper's metadata, any category; None if not mirrored."""
-        response = self._client.get(f"/papers/{xid}")
+        with _notice_if_slow(
+            f"waiting on the server ({self._url}/papers/{xid})..."
+        ):
+            response = self._client.get(f"/papers/{xid}")
         if response.status_code == 404:
             return None
         response.raise_for_status()
@@ -363,3 +370,21 @@ class RemoteStore:
 
 def _dates(datestamps: list[str]) -> list[datetime.date]:
     return [datetime.date.fromisoformat(d) for d in datestamps]
+
+
+@contextlib.contextmanager
+def _notice_if_slow(message: str, delay: float = 1.0):
+    """
+    Print `message` if the wrapped block is still running after `delay`
+    seconds — so a slow or hung server is visible rather than a silent
+    stall. A block that finishes promptly prints nothing. Applied to the
+    read queries but not event posting, which runs while the scanning TUI
+    owns the screen.
+    """
+    timer = threading.Timer(delay, print, args=(message,))
+    timer.daemon = True
+    timer.start()
+    try:
+        yield
+    finally:
+        timer.cancel()

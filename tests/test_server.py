@@ -116,3 +116,18 @@ def test_reading_state_queries_round_trip(tmp_path):
         {"t": "2026-01-03", "type": "read-import", "xid": "2601.00001"},
     ]
     remote.refresh_events()   # a no-op, but part of the interface
+
+
+def test_notice_if_slow_prints_only_when_slow(capsys):
+    import time
+
+    from firehose.store import _notice_if_slow
+
+    with _notice_if_slow("waiting...", delay=0.01):
+        time.sleep(0.05)
+    assert "waiting..." in capsys.readouterr().out
+
+    with _notice_if_slow("waiting...", delay=0.5):
+        pass
+    time.sleep(0.05)   # were the timer leaked, it would fire soon after
+    assert capsys.readouterr().out == ""
