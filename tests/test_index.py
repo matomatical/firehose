@@ -60,18 +60,20 @@ def _write_config(tmp_path):
 def test_rebuild_index_from_mirror(tmp_path):
     config_path = _write_config(tmp_path)
     mirror_dir = str(tmp_path / "data" / "metadata")
-    mirror.write_paper(mirror_dir, {
+    updater = mirror.Updater(mirror_dir)
+    updater.upsert({
         "id": "2003.14184",
         "categories": ["math.PR", "cs.NA"],
         "versions": [{"version": "v1", "date": "2020-03-28T03:22:52Z"}],
         "oai_datestamp": "2026-07-28",
     })
-    mirror.write_paper(mirror_dir, {
+    updater.upsert({
         "id": "math/0211159",
         "categories": ["math.DG"],
         "versions": [{"version": "v1", "date": "2002-11-11T16:11:49Z"}],
         "oai_datestamp": "2005-09-17",
     })
+    updater.flush()
 
     index.rebuild_index(config_path=config_path)
 

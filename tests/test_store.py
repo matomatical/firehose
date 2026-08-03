@@ -168,8 +168,12 @@ def test_select_papers_read_imports_mark_seen(tmp_path):
 
 def test_select_papers_drops_ids_missing_from_mirror(tmp_path):
     # an id in the index whose document was deleted upstream is skipped
+    from firehose import mirror
+
     make_data_dir(tmp_path, [make_doc("2601.00001"), make_doc("2601.00002")])
-    (tmp_path / "metadata" / "2601" / "2601.00001.json").unlink()
+    updater = mirror.Updater(str(tmp_path / "metadata"))
+    updater.delete("2601.00001")
+    updater.flush()
     store = make_store(tmp_path)
 
     papers = store.select_papers(10)

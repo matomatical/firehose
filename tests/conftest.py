@@ -44,12 +44,14 @@ def make_data_dir(data_dir, docs: list[dict], events: list[dict] = ()) -> None:
     its "t" timestamp) onto the event log.
     """
     entries = {}
+    updater = mirror.Updater(str(data_dir / "metadata"))
     for doc in docs:
-        mirror.write_paper(str(data_dir / "metadata"), doc)
+        updater.upsert(doc)
         entries[doc["id"]] = index.Entry(
             date=datetime.date.fromisoformat(doc["oai_datestamp"]),
             categories=tuple(doc["categories"]),
         )
+    updater.flush()
     if entries:
         index.save_index(
             path=str(data_dir / "index.txt"),

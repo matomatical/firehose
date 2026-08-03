@@ -44,18 +44,19 @@ def _raw_record(xid, *, datestamp, submitted=None, deleted=False, title="T"):
 def test_apply_upserts_and_deletes(tmp_path):
     mirror_dir = str(tmp_path)
     entries = {}
+    updater = mirror_store.Updater(mirror_dir)
     live = arxivraw.parse_record(_raw_record(
         "2606.00001",
         datestamp="2026-06-02",
         submitted="Mon, 01 Jun 2026 10:00:00 GMT",
     ).xml)
 
-    assert harvest_module._apply(live, entries, mirror_dir) == "new"
+    assert harvest_module._apply(live, entries, updater) == "new"
     assert entries["2606.00001"] == index.Entry(
         date=datetime.date(2026, 6, 1),
         categories=("cs.AI", "math.ST"),
     )
-    assert harvest_module._apply(live, entries, mirror_dir) == "unchanged"
+    assert harvest_module._apply(live, entries, updater) == "unchanged"
 
     revised = arxivraw.parse_record(_raw_record(
         "2606.00001",
@@ -63,17 +64,18 @@ def test_apply_upserts_and_deletes(tmp_path):
         submitted="Mon, 01 Jun 2026 10:00:00 GMT",
         title="Revised",
     ).xml)
-    assert harvest_module._apply(revised, entries, mirror_dir) == "updated"
+    assert harvest_module._apply(revised, entries, updater) == "updated"
 
     deleted = arxivraw.parse_record(_raw_record(
         "2606.00001", datestamp="2026-06-04", deleted=True,
     ).xml)
-    assert harvest_module._apply(deleted, entries, mirror_dir) == "deleted"
+    assert harvest_module._apply(deleted, entries, updater) == "deleted"
     assert "2606.00001" not in entries
-    assert mirror_store.read_paper(mirror_dir, "2606.00001") is None
-    assert harvest_module._apply(deleted, entries, mirror_dir) == (
+    assert harvest_module._apply(deleted, entries, updater) == (
         "deleted-absent"
     )
+    updater.flush()
+    assert mirror_store.read_paper(mirror_dir, "2606.00001") is None
 
 
 def _configure_mirror(monkeypatch, tmp_path, records, expect_identify):

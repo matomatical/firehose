@@ -110,13 +110,11 @@ def rebuild_index(
     if not os.path.isdir(paths.mirror):
         raise SystemExit(f"no mirror at {paths.mirror}; run `firehose mirror`")
 
-    print("counting papers...")
-    total = mirror.count_papers(paths.mirror)
-    print(f"rebuilding index from {total} papers...")
+    print("rebuilding index from the mirror...")
     entries = {}
     watermark = None
     documents = mirror.iter_papers(paths.mirror)
-    for doc in tqdm.tqdm(documents, total=total, ncols=80, disable=None):
+    for doc in tqdm.tqdm(documents, ncols=80, disable=None):
         entries[doc["id"]] = Entry(
             date=arxivraw.submitted_date(doc),
             categories=tuple(doc.get("categories", ())),

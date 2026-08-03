@@ -77,6 +77,7 @@ def mirror(
         disable=None,
     )
     totals = collections.Counter()
+    updater = mirror_store.Updater(paths.mirror)
     last_request_time = time.time()
     try:
         for batch_number in (
@@ -102,7 +103,7 @@ def mirror(
             for record in batch:
                 try:
                     parsed = arxivraw.parse_record(record.xml)
-                    status = _apply(parsed, entries, paths.mirror)
+                    status = _apply(parsed, entries, updater)
                     watermark = max(watermark, parsed.datestamp)
                 except Exception as e:
                     counts["error"] += 1
@@ -125,10 +126,13 @@ def mirror(
                 )
             bar.write(f"* watermark: {watermark}")
 
-            # checkpoint the index so an interrupted run resumes from near
-            # where it stopped rather than from the last completed run
+            # checkpoint so an interrupted run resumes from near where it
+            # stopped rather than from the last completed run. The mirror
+            # flushes first: the index (whose save advances the watermark)
+            # must never describe papers the mirror doesn't hold.
             if batch_number % checkpoint_batches == 0:
-                bar.write("checkpoint: saving index...")
+                bar.write("checkpoint: flushing mirror and saving index...")
+                updater.flush()
                 index.save_index(
                     path=paths.index, watermark=watermark, entries=entries,
                 )
@@ -148,7 +152,8 @@ def mirror(
         print("totals: " + ", ".join(
             f"{key}: {count}" for key, count in sorted(totals.items())
         ))
-        print("saving index...")
+        print("flushing mirror and saving index...")
+        updater.flush()
         index.save_index(
             path=paths.index, watermark=watermark, entries=entries,
         )
@@ -160,19 +165,19 @@ def mirror(
 def _apply(
     parsed: arxivraw.ParsedRecord,
     entries: dict[str, index.Entry],
-    mirror_dir: str,
+    updater: mirror_store.Updater,
 ) -> str:
     """
-    Apply one parsed OAI record to the mirror and the in-memory index
-    entries. Returns "new", "updated", or "unchanged" for live records
-    (per the mirror write), or "deleted" / "deleted-absent" for records
-    deleted upstream (per whether there was a paper to remove).
+    Apply one parsed OAI record to the mirror updater and the in-memory
+    index entries. Returns "new", "updated", or "unchanged" for live
+    records (per the mirror upsert), or "deleted" / "deleted-absent" for
+    records deleted upstream (per whether there was a paper to remove).
     """
     if parsed.doc is None:
-        existed = mirror_store.delete_paper(mirror_dir, parsed.xid)
+        existed = updater.delete(parsed.xid)
         entries.pop(parsed.xid, None)
         return "deleted" if existed else "deleted-absent"
-    status = mirror_store.write_paper(mirror_dir, parsed.doc)
+    status = updater.upsert(parsed.doc)
     entries[parsed.xid] = index.Entry(
         date=arxivraw.submitted_date(parsed.doc),
         categories=tuple(parsed.doc.get("categories", ())),

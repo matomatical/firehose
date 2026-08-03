@@ -123,8 +123,9 @@ class LocalStore:
         """
         Choose up to `n` unseen subscribed papers (see the module-level
         `select_papers` for the window semantics) and return them with full
-        metadata. A selected id missing from the mirror (deleted upstream
-        since the index was built) is silently dropped.
+        metadata, decompressing each selected month once. A selected id
+        missing from the mirror (deleted upstream since the index was
+        built) is silently dropped.
         """
         selected = select_papers(
             self._dates,
@@ -136,12 +137,14 @@ class LocalStore:
             cutoff=cutoff,
             rng=rng,
         )
-        papers = []
-        for xid, _date in selected:
-            doc = mirror.read_paper(self._paths.mirror, xid)
-            if doc is not None:
-                papers.append(Paper.from_mirror_doc(doc))
-        return papers
+        docs = mirror.read_papers(
+            self._paths.mirror, [xid for xid, _date in selected],
+        )
+        return [
+            Paper.from_mirror_doc(docs[xid])
+            for xid, _date in selected
+            if xid in docs
+        ]
 
     def get_paper(self, xid: str) -> Paper | None:
         """One paper's metadata, any category; None if not mirrored."""
