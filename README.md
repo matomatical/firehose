@@ -136,8 +136,8 @@ easiest way to start is to edit the one that's already there.
   "setSpecs" in colon form (e.g. `cs:cs:AI`, `stat:stat:ML`). For reference,
   `firehose classes` prints arXiv's full catalog of setSpecs and names.
 
-  (Note: Changing this list invalidates your cache and requires you delete it
-  and re-run `firehose harvest`, see below).
+  (The metadata mirror stores all of arXiv regardless of this list, so you can
+  change your subscription at any time and it takes effect immediately.)
 
 * `paths.data` controls where the index and logs live. A relative path is
   resolved from the directory holding `config.toml`, so firehose finds the
@@ -164,58 +164,43 @@ Usage
 First time usage after installation:
 
 * Configure categories in `config.toml`.
-* Run `firehose harvest` (needs a couple hours) to download local index of
-  arxiv ids in your categories.
+* Run `firehose mirror` (needs several hours) to download a local mirror of
+  arXiv metadata.
 * Set up separate private git repo inside the data/ folder to save your
-  progress.
+  progress (see the data files section for what to track).
 
 Daily usage:
 
-* Run `firehose harvest` (needs <1min) to update local index of arxiv ids
+* Run `firehose mirror` (needs <1min) to pull new and updated records into
+  the local mirror.
 * Run `firehose sample <n>` to launch the terminal UI scanner and scan the
   latest *n* papers (see `--help` for more options).
 * **Important:** Update git tracking of the data/ folder to save your progress.
 * Run `firehose calendar` or other subcommands to marvel at your progress.
 
-### `harvest`: build the index
+### `mirror`: build the local metadata mirror
 
-`firehose harvest` creates and updates `data/arxiv.txt`: the id and submission
-date of every paper in your subscribed categories. Entries are grouped by date,
-to keep the file small and greppable:
-
-```
-latest datestamp: 2026-03-05
-1990-01-01:
-cs/9301111
-1991-08-01:
-cs/9301113
-...
-2026-03-05:
-2603.04402
-2603.04417
-```
+`firehose mirror` creates and updates a full local mirror of arXiv paper
+metadata (all categories, ~3M papers, ~12GB on disk): one JSON document per
+paper under `data/metadata/`, plus a derived plain-text index
+(`data/index.txt`) of every paper's id, submission date, and categories.
+Everything else — scanning, selection, the visualisations — runs against this
+local mirror, so nothing but `mirror` itself ever touches the network for
+metadata.
 
 Firehose uses arXiv's
   [Open Archives Initiative (OAI-PMH)](https://info.arxiv.org/help/oa/index.html)
 API rather than the regular web API: it returns 3,500 records per request,
 which is much faster than using the web API. The *first* run still takes a few
-hours to chew through arXiv's enormous backlog, but after that, daily runs take
-less than a minute.
-
-Known issues:
-
-* The long first harvest can crash. On a keyboard interrupt or an exception
-  I've anticipated it saves its progress and can simply be restarted.
-  If you hit a *new* crash, well, sorry! Catch it and send a patch.
-
-* There's a persistent crash somewhere around 2006 that I never got to the
-  bottom of. If you hit it, modify the arxiv date to restart from a few days
-  earlier.
+hours (about five) to chew through arXiv's enormous backlog, but after that,
+daily runs take less than a minute. Runs checkpoint as they go and resume from
+where they left off, so an interrupted first run (or a flaky connection) just
+means running it again.
 
 ### `sample`: scan abstracts
 
-`firehose sample [N]` downloads metadata for the latest `N` unread papers
-(default 100) and presents them one at a time.
+`firehose sample [N]` selects the latest `N` unread papers (default 100) from
+the local mirror and presents them one at a time.
 
 Each paper shows its title, authors, categories, abstract, and any comment,
 with a progress bar and a live "seconds per paper" dwell timer along the top.
@@ -272,11 +257,12 @@ selection:
 | `--no-modern`        | include papers older than `[scan].modern_cutoff`       |
 | `--backwards`        | oldest unread first, instead of newest                 |
 | `--randomise`        | a random sample of unread papers                       |
-| `--no-query`         | just show the selection's date calendar, no API call   |
+| `--no-query`         | just show the selection's date calendar, then exit     |
 
-Every view, save, download, and removal is also appended as a timestamped event
-to `data/scanlog.jsonl`, which supports later analysis of your scanning habits
-and taste for papers.
+Every view, save, download, and removal is appended as a timestamped event to
+`data/scanlog.jsonl`. This event log is the record of what you have seen (a
+viewed paper never appears in a future sample) and supports later analysis of
+your scanning habits and taste for papers.
 
 ### `classes`: list arXiv categories
 
@@ -287,7 +273,7 @@ some more categories).
 
 ### Visualising your reading
 
-Firehose can render visualisations of the index and read log to the terminal:
+Firehose can render visualisations of the index and event log to the terminal:
 
 * **`calendar`**: a heatmap of your reading by date. `--mode read-date`
   (default) colours days by how many titles you scanned; `--mode submit-date`
@@ -330,24 +316,27 @@ useful to get an idea of historical volume.
 Data files
 ----------
 
-Everything firehose knows lives in plain text under `data/`, all greppable and
-hand-editable:
+Everything firehose knows lives in plain files under `data/`, all greppable
+and hand-editable:
 
-* **`arxiv.txt`**: the index: a `latest datestamp:` watermark, then bare paper
-  ids grouped under `<date>:` (submission-date) headers. Written by `harvest`.
-* **`readlog.txt`**: the seen-index, in the same grouped format (by the date
-  you viewed each paper). `sample` appends to it so you never see a paper
-  twice.
+* **`metadata/`**: the mirror: one JSON document per arXiv paper, sharded by
+  submission month (`metadata/<YYMM>/<id>.json`), holding title, authors,
+  abstract, categories, comments, and per-version dates. Written by `mirror`.
+* **`index.txt`**: derived from the mirror: a `latest datestamp:` watermark,
+  then each paper's id and categories grouped under `<date>:`
+  (submission-date) headers. Rebuildable at any time with
+  `firehose rebuild-index`.
 * **`scanlog.jsonl`**: an append-only event log, one JSON object per line
   (`{"t": ..., "type": "view"|"save"|"download"|..., "xid": ...}`), recording
-  each scanning session for later analysis.
+  each scanning session. This is the canonical record of your reading.
 
 `data/` is gitignored by default, so your reading history never lands in the
 code repo, and it's created automatically on first run.
 
-However, this folder becomes highly valuable after some usage: the index takes
-hours to harvest and the read log is irreplaceable. I keep my `data/` under its
-own private git repo, but any method of backing up will do.
+The event log becomes highly valuable after some usage: it is small and
+irreplaceable, so back it up. I keep mine under its own private git repo
+(with the mirror and index gitignored — they're bulky and rebuildable from
+arXiv by re-running `mirror`), but any method of backing up will do.
 
 Contributing
 ------------

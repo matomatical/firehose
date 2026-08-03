@@ -72,8 +72,7 @@ def data_paths(
     data_dir = os.path.expanduser(data_dir or config["paths"]["data"])
     return types.SimpleNamespace(
         data_dir=data_dir,
-        cache=os.path.join(data_dir, "arxiv.txt"),
-        readlog=os.path.join(data_dir, "readlog.txt"),
+        readlog=os.path.join(data_dir, "readlog.txt"),  # retired format
         scanlog=os.path.join(data_dir, "scanlog.jsonl"),
         mirror=os.path.join(data_dir, "metadata"),
         index=os.path.join(data_dir, "index.txt"),
@@ -99,48 +98,25 @@ def subscribed_categories(config: dict) -> set[str]:
 
 # # #
 # File parsing utilities
-#
-# arxiv.txt (the paper cache) and readlog.txt (the seen-index) are plain text,
-# one paper per logical entry, sorted by date. To keep them small while staying
-# greppable and hand-editable, entries sharing a date are grouped under a
-# single date header rather than repeating the date on every line:
-#
-#     2026-03-04:    <- date header: every bare id below it has this date
-#     2603.00012
-#     2603.00077
-#     2025-08-12:
-#     2508.00002
-#
-# save_cache and readlog's live append (append_readlog, driven by
-# sample.Readlog) both emit this grouped form.
-
-
-def load_cache(
-    path: str,
-) -> tuple[dict[str, datetime.date], datetime.date]:
-    """
-    Load the {id: date} paper cache plus the "latest datestamp" watermark from
-    the first line.
-    """
-    with open(path, 'r') as f:
-        # 1st line has form "latest datestamp: DATESTAMP"
-        latest_date = to_date(next(f).strip().split(": ")[-1])
-        # subsequent lines are papers (see the format note above)
-        lines = f.read().splitlines()
-    cache = {}
-    for xid, date in _parse_dated_lines(tqdm.tqdm(lines, ncols=80)):
-        cache[xid] = date
-    return cache, latest_date
 
 
 def load_readlog(
     path: str,
 ) -> tuple[dict[str, datetime.date], datetime.date | None]:
     """
-    Load the seen-index as a {id: date} dict, plus the date of its last entry
-    (None if empty). That date seeds the live appender's open group, so
-    resuming a same-day session continues that group without re-reading the
-    file. Returns an empty log and no last date when the file does not exist yet.
+    Load a retired-format readlog.txt as a {id: date} dict, plus the date of
+    its last entry (None if empty, or when the file does not exist).
+
+    The format is plain text with entries grouped under date headers:
+
+        2026-03-04:    <- date header: every bare id below it has this date
+        2603.00012
+        2603.00077
+
+    The live client no longer writes this file — reading history lives in
+    the event log — but this parser remains so the one-off import of a
+    readlog into the event log can be re-run against a straggler copy
+    (e.g. from a machine that scanned on an older client).
     """
     if not os.path.exists(path):
         return {}, None
@@ -168,84 +144,7 @@ def _parse_dated_lines(lines):
             yield line, current_date
 
 
-# # # 
-# File writing utilities
-
-
-def save_cache(
-    path: str,
-    latest_date: datetime.date,
-    cache: dict[str, datetime.date],
-) -> None:
-    """
-    Write the {id: date} paper cache to disk: the "latest datestamp" watermark
-    on the first line, then the bare ids sorted by date and grouped. The new
-    contents are flushed to a sibling temporary file before atomically replacing
-    the previous cache, which remains intact if serialization is interrupted.
-    """
-    sorted_cache = sorted((date, xid) for xid, date in cache.items())
-    parent = os.path.dirname(os.path.abspath(path))
-    temp_path = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=parent,
-            prefix=".firehose-cache-",
-            suffix=".tmp",
-            delete=False,
-        ) as f:
-            temp_path = f.name
-            f.write(f"latest datestamp: {to_datestamp(latest_date)}\n")
-            _write_grouped(f, tqdm.tqdm(sorted_cache, ncols=80))
-            f.flush()
-            os.fsync(f.fileno())
-
-        assert temp_path is not None
-        os.replace(temp_path, path)
-        temp_path = None
-    finally:
-        if temp_path is not None:
-            try:
-                os.remove(temp_path)
-            except FileNotFoundError:
-                pass
-
-
-def _write_grouped(f, dated_ids):
-    """
-    Write (date, id) pairs, sorted by date, in grouped form: a "<date>:" header
-    whenever the date changes, then each id on its own line.
-    """
-    current_date = None
-    for date, xid in dated_ids:
-        if date != current_date:
-            f.write(f"{to_datestamp(date)}:\n")
-            current_date = date
-        f.write(f"{xid}\n")
-
-
-def append_readlog(
-    path: str,
-    xid: str,
-    date: datetime.date,
-    open_date: datetime.date | None,
-) -> datetime.date:
-    """
-    Append `xid` to the seen-index in grouped form, writing a "<date>:" header
-    first iff `open_date` (the date currently governing the end of the file)
-    differs from `date`. Returns `date` as the new open_date to thread into the
-    next call; seed the first call with the readlog's last date from
-    load_readlog (None for a fresh file).
-    """
-    with open(path, 'a') as f:
-        if open_date != date:
-            f.write(f"{to_datestamp(date)}:\n")
-        f.write(f"{xid}\n")
-    return date
-
-
-# # # 
+# # #
 # Event logging utilities
 
 
@@ -296,35 +195,6 @@ def to_datestamp(date: datetime.date) -> str:
 
 # # # 
 # ArXiv paper handling utilities
-
-
-def to_name(result) -> str:
-    """
-    `result` is from the arXiv API, it has field:
-
-    * .authors: a list of authors with str .name fields
-    * .published.year: the year of submission
-    * .title: string title
-
-    This method combines these into a string name for the paper.
-    """
-    # author
-    # 1:  LastName
-    # 2:  LastName1+LastName2
-    # >2: LastName1+
-    authors = [a.name.split()[-1] for a in result.authors]
-    if len(authors) > 2:
-        authors[1:] = [""]
-    author_str = "+".join(authors)
-
-    # year is just year
-    year_str = str(result.published.year)
-
-    # title is just title
-    title_str = result.title
-
-    # combine
-    return f"{author_str}{year_str} {title_str}"
 
 
 def to_filename(name: str, xidv: str) -> str:

@@ -2,9 +2,10 @@
 #
 
 [paths]
-# Where firehose keeps its data files (arxiv.txt, readlog.txt, scanlog.jsonl).
-# A relative path resolves from the directory holding this config file, so
-# firehose finds the same data wherever it is run from; ~ is expanded.
+# Where firehose keeps its data files (the metadata mirror, its index, and
+# the scan event log). A relative path resolves from the directory holding
+# this config file, so firehose finds the same data wherever it is run from;
+# ~ is expanded.
 # Override for a single run with --data-dir (resolved from the current dir).
 data = "data"
 # Where grabbed PDFs are saved (gitignored; filed under <YYYY-MM>/ subdirs).
@@ -20,9 +21,11 @@ downloads = "downloads"
 modern_cutoff = 2025-04-15
 
 [arxiv]
-# arXiv categories are OAI "setSpecs" (colon form, e.g. cs:cs:AI). firehose
-# harvest monitors new papers belonging to any uncommented categories in the
-# list below (adding/removing categories requires a full reharvest).
+# arXiv categories are OAI "setSpecs" (colon form, e.g. cs:cs:AI). Scanning
+# and the reading-state visualisations cover papers belonging to any
+# uncommented categories in the list below. The mirror stores all of arXiv
+# regardless, so changing the subscription takes effect immediately — no
+# reharvest needed.
 categories = [
     # === Computer Science (cs:cs) ===
     "cs:cs:AI",                    # Artificial Intelligence

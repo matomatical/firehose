@@ -77,3 +77,7 @@ def test_to_name_author_forms():
     assert to_name(
         ["Ada Author", "Bo Boauthor", "Cy Coauthor"], 2026, "T"
     ) == "Author+2026 T"
+
+
+def test_to_name_uses_last_whitespace_token_as_surname():
+    assert to_name(["Jane van der Berg"], 2026, "X") == "Berg2026 X"

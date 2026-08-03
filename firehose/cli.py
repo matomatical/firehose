@@ -9,8 +9,6 @@ import firehose.vis
 
 def cli():
     tyro.extras.subcommand_cli_from_dict({
-        # harvest
-        'harvest': firehose.harvest.harvest,
         # full-metadata mirror (all categories) and its derived index
         'mirror': firehose.harvest.mirror,
         'rebuild-index': firehose.index.rebuild_index,
