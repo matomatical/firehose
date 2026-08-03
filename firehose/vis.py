@@ -253,6 +253,9 @@ def scan_time(
     print("loading scan log...")
     events = util.load_scanlog(path=paths.scanlog)
     print(f"loaded {len(events)} events")
+    untimed = sum(1 for e in events if e.get("type") == "read-import")
+    if untimed:
+        print(f"skipping {untimed} papers without timing data")
 
     summary = stats.summarise_scan_time(events)
     if not summary.days:
