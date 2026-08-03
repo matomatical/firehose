@@ -8,7 +8,7 @@ comment) plus derived identifiers: `xidv` (id with version suffix), and
 """
 
 import datetime
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -23,6 +23,9 @@ class Paper:
     published: object
     updated: object
     comment: object
+    # the mirror document this Paper was built from (None if hand-built):
+    # what a server sends a remote client, which rebuilds the Paper from it
+    doc: dict | None = field(default=None, repr=False, compare=False)
 
     @property
     def xid(self) -> str:
@@ -59,6 +62,7 @@ class Paper:
             published=published,
             updated=updated,
             comment=doc.get("comments"),
+            doc=doc,
         )
 
 

@@ -155,6 +155,11 @@ easiest way to start is to edit the one that's already there.
 * `scan.modern_cutoff` is a backstop for scanning. If you never want to see
   papers before the date you started scanning, set this.
 
+* `server.url`, when set, makes every command query a remote firehose server
+  (see the `serve` section) instead of local data files. An explicit
+  `--data-dir` still means the local files at that path. `server.listen_host`
+  and `server.listen_port` are where `firehose serve` itself listens.
+
 You can override the path to the config file in the code or with
 `--config-path`.
 
@@ -263,6 +268,25 @@ Every view, save, download, and removal is appended as a timestamped event to
 `data/scanlog.jsonl`. This event log is the record of what you have seen (a
 viewed paper never appears in a future sample) and supports later analysis of
 your scanning habits and taste for papers.
+
+### `serve`: run one mirror for several machines
+
+`firehose serve` exposes a machine's data (mirror, index, event log) over
+HTTP. Point another machine's `server.url` config at it and every firehose
+command there — scanning, calendars, the lot — runs against the server's
+data with no local mirror at all: selection happens server-side, events post
+back synchronously, and client startup is instant since the index lives in
+the server's memory.
+
+This is how I run firehose day to day: the mirror and harvesting live on an
+always-on mini PC, and my laptop scans against it over a
+[Tailscale](https://tailscale.com/) network. Two things to know:
+
+* **There is no authentication.** Bind the server to an interface that is
+  itself the trust boundary — a tailnet address, a LAN you trust, or
+  localhost. Never a public interface.
+* The server loads the index once at startup; restart it after a `mirror`
+  run so it sees new papers.
 
 ### `classes`: list arXiv categories
 

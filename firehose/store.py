@@ -6,15 +6,19 @@ touch the files directly.
 A Store answers a small set of queries — select papers to scan (with full
 metadata), fetch one paper, record scan events, and serve the pre-shaped
 reading-state data the visualisation commands consume — and hides where the
-answers come from. `LocalStore` answers from the data directory in-process:
+answers come from. There are two implementations, chosen by `make_store`
+from the config: `LocalStore` answers from the data directory in-process —
 the mirror (per-paper metadata), the index (id, submission date, categories
 per paper, loaded into memory), and the event log (the append-only record
-of scanning, from which the seen-set is derived).
+of scanning, from which the seen-set is derived) — and `RemoteStore`
+answers over HTTP from a firehose server that runs a LocalStore on its own
+machine's data.
 
 Category subscription is a query-time filter: the index covers all of
-arXiv, and a Store instance is constructed with the set of subscribed
-category names that selection and reading-state queries range over
-(`get_paper` is deliberately unrestricted).
+arXiv, and a LocalStore is constructed with the set of subscribed category
+names that selection and reading-state queries range over (`get_paper` is
+deliberately unrestricted). In remote mode the server's subscription
+applies.
 """
 
 import datetime
@@ -22,11 +26,27 @@ import json
 import os
 import random
 
+import httpx
+
 from firehose import index
 from firehose import mirror
 from firehose import stats
 from firehose import util
 from firehose.paper import Paper
+
+
+def make_store(config: dict, data_dir: str | None = None):
+    """
+    The store the config asks for: a RemoteStore on the [server] section's
+    `url` when one is set, else a LocalStore on the local data directory.
+    An explicit `data_dir` override always means the local files at that
+    path.
+    """
+    url = config.get("server", {}).get("url")
+    if url and data_dir is None:
+        return RemoteStore(url)
+    paths = util.data_paths(config, data_dir=data_dir)
+    return LocalStore(paths, subscribed=util.subscribed_categories(config))
 
 
 def select_papers(
@@ -156,12 +176,18 @@ class LocalStore:
 
     def record_events(self, events: list[dict]) -> None:
         """
-        Append events to the log (each stamped with the current time on
-        write) and fold any view events into the in-memory seen-set.
+        Append events to the log and fold any view events into the
+        in-memory seen-set. An event arriving with a "t" timestamp (e.g.
+        stamped by a remote client) keeps it; bare events are stamped with
+        the current time.
         """
         for event in events:
+            if "t" not in event:
+                event = {"t": datetime.datetime.now().isoformat(), **event}
             util.log_event(self._paths.scanlog, event)
-            self._fold_event(event, datetime.date.today())
+            self._fold_event(
+                event, datetime.date.fromisoformat(event["t"][:10]),
+            )
 
     def refresh_events(self) -> None:
         """
@@ -226,3 +252,114 @@ class LocalStore:
     def scan_events(self) -> list[dict]:
         """The full event log, in file (chronological) order."""
         return list(self._events)
+
+
+class RemoteStore:
+    """
+    A Store over HTTP: a thin client of a firehose server (`firehose
+    serve`), one request per query. Event timestamps are stamped here, with
+    this machine's clock, before posting. Queries are always as fresh as
+    the server, so `refresh_events` has nothing to do.
+    """
+
+    def __init__(self, url: str, client: httpx.Client | None = None):
+        self._client = client or httpx.Client(
+            base_url=url, timeout=30.0, follow_redirects=True,
+        )
+
+    def _get(self, path: str, **params):
+        response = self._client.get(
+            path,
+            params={
+                key: value for key, value in params.items()
+                if value is not None
+            },
+        )
+        response.raise_for_status()
+        return response.json()
+
+    # # #
+    # Selection and metadata
+
+    def select_papers(
+        self,
+        n: int,
+        *,
+        backwards: bool = False,
+        randomise: bool = False,
+        offset: int | None = None,
+        cutoff: datetime.date | None = None,
+        rng=random,
+    ) -> list[Paper]:
+        """
+        Choose up to `n` unseen subscribed papers with full metadata; the
+        selection itself runs on the server (`rng` only draws the seed a
+        randomised order is requested under).
+        """
+        docs = self._get(
+            "/papers",
+            n=n,
+            backwards=backwards,
+            randomise=randomise,
+            seed=rng.getrandbits(63) if randomise else None,
+            offset=offset,
+            cutoff=cutoff.isoformat() if cutoff is not None else None,
+        )
+        return [Paper.from_mirror_doc(doc) for doc in docs]
+
+    def get_paper(self, xid: str) -> Paper | None:
+        """One paper's metadata, any category; None if not mirrored."""
+        response = self._client.get(f"/papers/{xid}")
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        return Paper.from_mirror_doc(response.json())
+
+    # # #
+    # Events
+
+    def record_events(self, events: list[dict]) -> None:
+        """Post events to the server, stamped with this machine's clock."""
+        now = datetime.datetime.now().isoformat()
+        stamped = [
+            event if "t" in event else {"t": now, **event}
+            for event in events
+        ]
+        response = self._client.post("/events", json=stamped)
+        response.raise_for_status()
+
+    def refresh_events(self) -> None:
+        pass
+
+    # # #
+    # Reading-state queries (pre-shaped for the visualisation commands)
+
+    def submitted_dates(self) -> list[datetime.date]:
+        return _dates(self._get("/stats/submitted-dates"))
+
+    def unread_dates(
+        self, cutoff: datetime.date | None = None,
+    ) -> list[datetime.date]:
+        return _dates(self._get(
+            "/stats/unread-dates",
+            cutoff=cutoff.isoformat() if cutoff is not None else None,
+        ))
+
+    def read_dates(self) -> list[datetime.date]:
+        return _dates(self._get("/stats/read-dates"))
+
+    def read_submit_dates(self) -> list[datetime.date]:
+        return _dates(self._get("/stats/read-submit-dates"))
+
+    def subscribed_ids(self) -> list[str]:
+        return self._get("/stats/subscribed-ids")
+
+    def read_ids(self) -> set[str]:
+        return set(self._get("/stats/read-ids"))
+
+    def scan_events(self) -> list[dict]:
+        return self._get("/stats/scan-events")
+
+
+def _dates(datestamps: list[str]) -> list[datetime.date]:
+    return [datetime.date.fromisoformat(d) for d in datestamps]

@@ -4,6 +4,7 @@ import firehose.harvest
 import firehose.classes
 import firehose.index
 import firehose.sample
+import firehose.server
 import firehose.vis
 
 
@@ -12,6 +13,8 @@ def cli():
         # full-metadata mirror (all categories) and its derived index
         'mirror': firehose.harvest.mirror,
         'rebuild-index': firehose.index.rebuild_index,
+        # serve this machine's data to remote firehose clients
+        'serve': firehose.server.serve,
         # sample
         'sample': firehose.sample.sample,
         # print arXiv category catalog

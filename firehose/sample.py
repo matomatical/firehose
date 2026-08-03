@@ -25,7 +25,7 @@ import readchar
 
 from firehose import util
 from firehose import vis
-from firehose.store import LocalStore
+from firehose.store import make_store
 
 
 # semantic scan commands keyed by raw keypress (readchar key constants are
@@ -75,11 +75,8 @@ def sample(
     With --no-query, stop after previewing the selection's calendar.
     """
     config = util.load_config(config_path)
-    paths = util.data_paths(config, data_dir=data_dir)
-    util.ensure_data_dir(paths)  # the event log gets written during the scan
     download_dir = download_dir or config["paths"]["downloads"]
-
-    store = LocalStore(paths, subscribed=util.subscribed_categories(config))
+    store = make_store(config, data_dir=data_dir)
 
     print("selecting papers to scan...")
     papers = store.select_papers(

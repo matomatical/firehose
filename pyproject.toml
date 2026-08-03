@@ -22,6 +22,10 @@ dependencies = [
     "readchar",
     "pathvalidate",
     "requests",
+    # for serve (server) and the remote store (client)
+    "fastapi",
+    "uvicorn",
+    "httpx",
     # # types
     # "mypy",
     # "types-tqdm",

@@ -8,13 +8,12 @@ import matthewplotlib as mp
 
 from firehose import stats
 from firehose import util
-from firehose.store import LocalStore
+from firehose.store import make_store
 
 
-def _store(config: dict, data_dir: str | None) -> LocalStore:
+def _store(config: dict, data_dir: str | None):
     """The store the visualisation commands query."""
-    paths = util.data_paths(config, data_dir=data_dir)
-    return LocalStore(paths, subscribed=util.subscribed_categories(config))
+    return make_store(config, data_dir=data_dir)
 
 
 def all_submitted_dates(
