@@ -170,7 +170,12 @@ def summarise_scan_time(events: list[dict]) -> ScanTimeSummary:
     grand totals. Distinct papers and active seconds are summed across
     sessions, so a paper re-viewed in a later session counts once per
     session (as the live seconds/paper does).
+
+    "read-import" events (reading history imported from before the event
+    log existed, with day-resolution timestamps) are not scan-time events
+    and are excluded up front.
     """
+    events = [e for e in events if e.get("type") != "read-import"]
     by_day: dict[datetime.date, DayStats] = {}
     total_sessions = 0
     for session in split_sessions(events):

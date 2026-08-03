@@ -169,3 +169,19 @@ def test_summarise_scan_time_empty():
     summary = stats.summarise_scan_time([])
     assert summary.days == [] and summary.sessions == 0
     assert summary.seconds == 0.0 and summary.seconds_per_paper == 0.0
+
+
+def test_summarise_scan_time_excludes_read_imports():
+    # a block of imported reading history (day-resolution timestamps,
+    # preceding any real session) contributes no sessions, papers, or time.
+    events = [
+        {"t": "2025-04-23", "type": "read-import", "xid": "old-a"},
+        {"t": "2025-04-24", "type": "read-import", "xid": "old-b"},
+        _ev("11:00:00", "start", n=1),
+        _ev("11:00:04", "view", xid="a"),
+        _ev("11:00:10", "end"),
+    ]
+    summary = stats.summarise_scan_time(events)
+    assert summary.sessions == 1 and summary.papers == 1
+    assert summary.seconds == 10.0
+    assert [d.date for d in summary.days] == [datetime.date(2026, 6, 22)]
