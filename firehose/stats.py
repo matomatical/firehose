@@ -2,7 +2,7 @@
 Pure data-shaping behind the visualisation commands.
 
 Everything here maps plain data structures (the {id: date} cache and readlog
-dicts, scanlog event lists) to plain data structures (date lists, histograms,
+dicts, event-log lists) to plain data structures (date lists, histograms,
 proportions, summary records). No I/O, no clock, no rendering dependencies —
 so it is unit-testable without a terminal, and callers on either side of a
 process boundary can compute or consume these shapes.
@@ -86,9 +86,9 @@ def batch_read_proportions(
 
 
 # # #
-# Scan-time analytics (from the scanlog event stream)
+# Scan-time analytics (from the event stream)
 #
-# These reduce a flat, chronological list of scanlog events (dicts with an
+# These reduce a flat, chronological list of scan events (dicts with an
 # ISO timestamp under "t" and a "type") into per-day and total dwell figures.
 # Time is wall-clock between consecutive events, paused spans excluded, and
 # "papers" counts the distinct ids seen — matching the seconds/paper shown
@@ -165,7 +165,7 @@ def session_active_seconds(events: list[dict]) -> float:
 
 def summarise_scan_time(events: list[dict]) -> ScanTimeSummary:
     """
-    Reduce a flat scanlog event list to a ScanTimeSummary: per-day DayStats
+    Reduce a flat scan-event list to a ScanTimeSummary: per-day DayStats
     (sorted by date, each session attributed to the day it began) and the
     grand totals. Distinct papers and active seconds are summed across
     sessions, so a paper re-viewed in a later session counts once per

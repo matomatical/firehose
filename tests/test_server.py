@@ -85,7 +85,7 @@ def test_record_events_round_trip(tmp_path):
     assert [p.xid for p in remote.select_papers(10)] == ["2601.00002"]
     events = [
         json.loads(line)
-        for line in (tmp_path / "scanlog.jsonl").read_text().splitlines()
+        for line in (tmp_path / "events.jsonl").read_text().splitlines()
     ]
     assert [e["type"] for e in events] == ["start", "view"]
     assert all("t" in e for e in events)

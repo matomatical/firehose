@@ -27,7 +27,7 @@ def mksession(tmp_path) -> Session:
     """A Session over a real LocalStore writing into tmp_path (the store's
     index and mirror are never touched by the effect tests)."""
     paths = types.SimpleNamespace(
-        scanlog=str(tmp_path / "scanlog.jsonl"),
+        events=str(tmp_path / "events.jsonl"),
         index=str(tmp_path / "index.txt"),
         mirror=str(tmp_path / "metadata"),
     )
@@ -407,7 +407,7 @@ def test_effects_run_end_to_end(tmp_path, monkeypatch):
 
     events = [
         json.loads(line)["type"]
-        for line in (tmp_path / "scanlog.jsonl").open()
+        for line in (tmp_path / "events.jsonl").open()
     ]
     assert events == [
         "start", "view", "save", "remove", "pause", "resume",
@@ -418,7 +418,7 @@ def test_effects_run_end_to_end(tmp_path, monkeypatch):
 
 
 def test_failed_download_is_not_logged_or_copied(tmp_path, monkeypatch):
-    scanlog_path = tmp_path / "scanlog.jsonl"
+    events_path = tmp_path / "events.jsonl"
     copied = []
 
     def fail_download(paper_id, path):
@@ -434,7 +434,7 @@ def test_failed_download_is_not_logged_or_copied(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError, match="offline"):
         run_effects(sc, sc.feed("download"), session)
 
-    events = [json.loads(line)["type"] for line in scanlog_path.open()]
+    events = [json.loads(line)["type"] for line in events_path.open()]
     assert events == ["start", "view"]
     assert copied == []
     assert list((tmp_path / "dl").rglob("*.pdf")) == []

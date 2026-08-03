@@ -199,7 +199,7 @@ def test_record_events_appends_and_marks_seen(tmp_path):
     store.record_events([{"type": "view", "xid": "2601.00001"}])
 
     # events land on disk, stamped
-    lines = (tmp_path / "scanlog.jsonl").read_text().splitlines()
+    lines = (tmp_path / "events.jsonl").read_text().splitlines()
     events = [json.loads(line) for line in lines]
     assert [e["type"] for e in events] == ["start", "view"]
     assert all("t" in e for e in events)
@@ -218,7 +218,7 @@ def test_refresh_events_tails_the_log(tmp_path):
     assert store.read_ids() == set()
 
     # another writer appends to the log after the store loaded it
-    with open(tmp_path / "scanlog.jsonl", "a") as f:
+    with open(tmp_path / "events.jsonl", "a") as f:
         f.write(json.dumps(
             {"t": "2026-01-03T10:00:05", "type": "view", "xid": "2601.00001"}
         ) + "\n")

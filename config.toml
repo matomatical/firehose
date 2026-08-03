@@ -23,11 +23,13 @@ modern_cutoff = 2025-04-15
 [server]
 # Client side: when `url` is set, every command queries that firehose server
 # instead of local data files (an explicit --data-dir still means local).
-# url = "http://100.64.0.1:8377"
+# `serve` and `mirror` always use the local files, so this is safe to set in
+# a config shared between the server machine and its clients.
+url = "http://100.82.212.8:8377"
 # Server side: where `firehose serve` listens. There is no authentication,
 # so bind only to an interface that is itself the trust boundary (e.g. a
 # tailnet address) -- never a public one.
-listen_host = "127.0.0.1"
+listen_host = "100.82.212.8"
 listen_port = 8377
 
 [arxiv]

@@ -265,7 +265,7 @@ selection:
 | `--no-query`         | just show the selection's date calendar, then exit     |
 
 Every view, save, download, and removal is appended as a timestamped event to
-`data/scanlog.jsonl`. This event log is the record of what you have seen (a
+`data/events.jsonl`. This event log is the record of what you have seen (a
 viewed paper never appears in a future sample) and supports later analysis of
 your scanning habits and taste for papers.
 
@@ -327,7 +327,7 @@ Firehose can render visualisations of the index and event log to the terminal:
   <img src="images/hilbert.png" alt="firehose hilbert">
 
 * **`time`**: how long you've spent scanning, read back from the scan log
-  (`scanlog.jsonl`). Prints a per-day table of sessions run, papers seen, time
+  (`events.jsonl`). Prints a per-day table of sessions run, papers seen, time
   spent, and seconds per paper, with a grand-total row, then (unless
   `--no-heatmap`) a calendar tinted by each day's scanning time (magenta = none,
   cyan = the busiest day, above a matching colour key). Dwell is the wall-clock between
@@ -353,7 +353,7 @@ and hand-editable:
   then each paper's id and categories grouped under `<date>:`
   (submission-date) headers. Rebuildable at any time with
   `firehose rebuild-index`.
-* **`scanlog.jsonl`**: an append-only event log, one JSON object per line
+* **`events.jsonl`**: an append-only event log, one JSON object per line
   (`{"t": ..., "type": "view"|"save"|"download"|..., "xid": ...}`), recording
   each scanning session. This is the canonical record of your reading.
 

@@ -73,7 +73,7 @@ def data_paths(
     return types.SimpleNamespace(
         data_dir=data_dir,
         readlog=os.path.join(data_dir, "readlog.txt"),  # retired format
-        scanlog=os.path.join(data_dir, "scanlog.jsonl"),
+        events=os.path.join(data_dir, "events.jsonl"),
         mirror=os.path.join(data_dir, "metadata"),
         index=os.path.join(data_dir, "index.txt"),
     )
@@ -150,7 +150,7 @@ def _parse_dated_lines(lines):
 
 def log_event(path: str, event: dict) -> None:
     """
-    Append one event as a JSON line to the scan log at `path`, stamped with the
+    Append one event as a JSON line to the event log at `path`, stamped with the
     current local time under the key "t".
     """
     record = {"t": datetime.datetime.now().isoformat(), **event}
@@ -161,9 +161,9 @@ def log_event(path: str, event: dict) -> None:
         f.write(json.dumps(record) + "\n")
 
 
-def load_scanlog(path: str) -> list[dict]:
+def load_events(path: str) -> list[dict]:
     """
-    Read every event from the scan log: the JSON object on each non-blank line,
+    Read every event from the event log: the JSON object on each non-blank line,
     in file (chronological) order. The inverse of log_event. Returns [] if the
     log does not exist yet (no scans recorded).
     """

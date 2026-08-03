@@ -201,7 +201,7 @@ def scan_time(
     """
     Report time spent scanning abstracts: per day, in total, and per paper.
 
-    Derives dwell from the scan log (data/scanlog.jsonl), the per-session
+    Derives dwell from the scan log (data/events.jsonl), the per-session
     start/view/.../end event stream. A session's active time is the wall-clock
     between its events minus any spans you paused (mirroring the live sample
     timer); "per paper" divides by distinct papers seen, matching sample's

@@ -59,7 +59,7 @@ def make_data_dir(data_dir, docs: list[dict], events: list[dict] = ()) -> None:
             entries=entries,
         )
     if events:
-        with open(data_dir / "scanlog.jsonl", "w") as f:
+        with open(data_dir / "events.jsonl", "w") as f:
             for event in events:
                 f.write(json.dumps(event) + "\n")
 

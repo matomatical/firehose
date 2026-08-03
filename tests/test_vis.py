@@ -60,11 +60,11 @@ def test_scan_time_legend_names_both_ends():
     assert label == "time spent: (magenta = 0:00:00, cyan = 0:10:25)"
 
 
-def test_scan_time_entry_point_runs_against_tmp_scanlog(tmp_path, capsys):
+def test_scan_time_entry_point_runs_against_tmp_events(tmp_path, capsys):
     # end-to-end through the shell (heatmap off, so no terminal needed): guards
     # the config -> data_paths -> store wiring, like the years smoke test.
     config_path = _config(tmp_path)
-    with open(tmp_path / "scanlog.jsonl", "w") as f:
+    with open(tmp_path / "events.jsonl", "w") as f:
         for event in [
             {"t": "2026-06-22T11:00:00", "type": "start", "n": 1},
             {"t": "2026-06-22T11:00:04", "type": "view", "xid": "a"},
@@ -94,7 +94,7 @@ def test_scan_time_entry_point_no_scans(tmp_path, capsys):
 
 def test_scan_time_notes_untimed_imported_reads(tmp_path, capsys):
     config_path = _config(tmp_path)
-    with open(tmp_path / "scanlog.jsonl", "w") as f:
+    with open(tmp_path / "events.jsonl", "w") as f:
         for event in [
             {"t": "2025-04-23", "type": "read-import", "xid": "old"},
             {"t": "2026-06-22T11:00:00", "type": "start", "n": 1},

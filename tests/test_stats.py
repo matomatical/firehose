@@ -86,7 +86,7 @@ def test_batch_read_proportions_nothing_read():
 # -- scan-time analytics core --------------------------------------------------
 
 def _ev(t, type, **rest):
-    """A scanlog event at "2026-06-22T<t>" (t is a "HH:MM:SS" suffix)."""
+    """A scan event at "2026-06-22T<t>" (t is a "HH:MM:SS" suffix)."""
     return {"t": f"2026-06-22T{t}", "type": type, **rest}
 
 

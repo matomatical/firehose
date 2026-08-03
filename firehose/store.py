@@ -184,7 +184,7 @@ class LocalStore:
         for event in events:
             if "t" not in event:
                 event = {"t": datetime.datetime.now().isoformat(), **event}
-            util.log_event(self._paths.scanlog, event)
+            util.log_event(self._paths.events, event)
             self._fold_event(
                 event, datetime.date.fromisoformat(event["t"][:10]),
             )
@@ -196,12 +196,12 @@ class LocalStore:
         the log's new bytes are read.
         """
         try:
-            size = os.path.getsize(self._paths.scanlog)
+            size = os.path.getsize(self._paths.events)
         except FileNotFoundError:
             return
         if size <= self._events_offset:
             return
-        with open(self._paths.scanlog, encoding="utf-8") as f:
+        with open(self._paths.events, encoding="utf-8") as f:
             f.seek(self._events_offset)
             for line in f:
                 if line.strip():
