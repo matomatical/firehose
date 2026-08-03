@@ -8,6 +8,13 @@ import matthewplotlib as mp
 
 from firehose import stats
 from firehose import util
+from firehose.store import LocalStore
+
+
+def _store(config: dict, data_dir: str | None) -> LocalStore:
+    """The store the visualisation commands query."""
+    paths = util.data_paths(config, data_dir=data_dir)
+    return LocalStore(paths, subscribed=util.subscribed_categories(config))
 
 
 def all_submitted_dates(
@@ -16,12 +23,10 @@ def all_submitted_dates(
     save_as: str | None = None,
 ):
     config = util.load_config(config_path)
-    print("loading all submit dates from paper cache...")
-    cache, _ = util.load_cache(path=util.data_paths(config, data_dir=data_dir).cache)
-    print(f"loaded {len(cache)} papers")
+    store = _store(config, data_dir)
 
     print("printing calendar...")
-    dates = list(cache.values())
+    dates = store.submitted_dates()
     vis = vis_dates(dates)
     print(vis)
 
@@ -39,26 +44,17 @@ def unread(
     """
     Show unread papers by submission date on a calendar heatmap.
 
-    Loads the paper cache and the read log, drops papers already seen and (with
-    --modern, the default) those on or before the modern cutoff, then renders the
-    rest by submission date. This is the calendar `sample` prints as its dry run,
-    without any API query or download. Pass --no-modern to include the full
-    backlog, --save-as to write the calendar to an image.
+    Drops papers already seen and (with --modern, the default) those on or
+    before the modern cutoff, then renders the rest by submission date. This
+    is the calendar `sample` prints as its dry run, without any download.
+    Pass --no-modern to include the full backlog, --save-as to write the
+    calendar to an image.
     """
     config = util.load_config(config_path)
-    paths = util.data_paths(config, data_dir=data_dir)
-
-    print("loading papers from disk...")
-    cache, _ = util.load_cache(path=paths.cache)
-    print(f"loaded {len(cache)} papers")
-
-    print("checking which have already been read...")
-    readlog, _ = util.load_readlog(path=paths.readlog)
-    read = set(readlog)
-    print(f"loaded {len(read)} already-read papers")
+    store = _store(config, data_dir)
 
     cutoff = config["scan"]["modern_cutoff"] if modern else None
-    unread_dates = stats.select_unread_dates(cache, read, cutoff=cutoff)
+    unread_dates = store.unread_dates(cutoff=cutoff)
     print(f"found {len(unread_dates)} unread papers")
 
     print("printing calendar...")
@@ -75,11 +71,11 @@ def all_submitted_years(
     data_dir: str | None = None,
 ):
     config = util.load_config(config_path)
-    print("loading all submit dates from paper cache...")
-    cache, _ = util.load_cache(path=util.data_paths(config, data_dir=data_dir).cache)
-    print(f"loaded {len(cache)} papers")
-    
-    years = collections.Counter([date.year for date in cache.values()])
+    store = _store(config, data_dir)
+
+    years = collections.Counter([
+        date.year for date in store.submitted_dates()
+    ])
 
     print("printing calendar...")
     for year, count in sorted(years.items()):
@@ -91,12 +87,10 @@ def all_submitted_months(
     data_dir: str | None = None,
 ):
     config = util.load_config(config_path)
-    print("loading all submit dates from paper cache...")
-    cache, _ = util.load_cache(path=util.data_paths(config, data_dir=data_dir).cache)
-    print(f"loaded {len(cache)} papers")
-    
+    store = _store(config, data_dir)
+
     year_months = collections.Counter([
-        (date.year, date.month) for date in cache.values()
+        (date.year, date.month) for date in store.submitted_dates()
     ])
 
     print("printing calendar...")
@@ -115,28 +109,19 @@ def reading_calendar(
     save_as: str | None = None,
 ):
     config = util.load_config(config_path)
-    paths = util.data_paths(config, data_dir=data_dir)
-    print("loading read log...")
-    readlog, _ = util.load_readlog(path=paths.readlog)
-    print(f"loaded {len(readlog)} already-read papers")
+    store = _store(config, data_dir)
 
-    if mode == "submit-date" or mode == "proportion":
-        print("loading their submitted dates from paper cache...")
-        cache, _ = util.load_cache(path=paths.cache)
-        print(f"resolved {len(cache)} read papers")
-    
     print("printing calendar...")
     if mode == "read-date":
-        read_dates = list(readlog.values())
-        vis = vis_dates(read_dates)
+        vis = vis_dates(store.read_dates())
 
     elif mode == "submit-date":
-        vis = vis_dates(stats.read_submit_dates(readlog, cache))
+        vis = vis_dates(store.read_submit_dates())
 
     elif mode == "proportion":
         vis = vis_dates(
-            dates=stats.read_submit_dates(readlog, cache),
-            all_dates=list(cache.values()),
+            dates=store.read_submit_dates(),
+            all_dates=store.submitted_dates(),
         )
 
     print(vis)
@@ -153,21 +138,12 @@ def linear(
     save_as: str | None = None,
 ):
     config = util.load_config(config_path)
-    paths = util.data_paths(config, data_dir=data_dir)
-    print("loading all submitted ids from paper cache...")
-    cache, _ = util.load_cache(path=paths.cache)
-    all_xids = list(cache.keys())
-    print(f"found {len(all_xids)} papers")
-
-    print("loading read log")
-    readlog, _ = util.load_readlog(path=paths.readlog)
-    read_xids = list(readlog.keys())
-    print(f"found {len(read_xids)} read papers")
+    store = _store(config, data_dir)
 
     print("printing visualisation...")
     vis = vis_all(
-        all_xids=all_xids,
-        read_xids=read_xids,
+        all_xids=store.subscribed_ids(),
+        read_xids=list(store.read_ids()),
         batch_size=batch_size,
     )
     print(vis)
@@ -184,52 +160,37 @@ def hilbert(
     data_dir: str | None = None,
 ):
     config = util.load_config(config_path)
-    paths = util.data_paths(config, data_dir=data_dir)
-    print("loading all submitted ids from paper cache...")
-    cache, _ = util.load_cache(path=paths.cache)
-    all_xids = {xid: i for i, xid in enumerate(cache.keys())}
-    print(f"found {len(all_xids)} papers")
+    store = _store(config, data_dir)
+    all_xids = {xid: i for i, xid in enumerate(store.subscribed_ids())}
 
-    print("computing read vector...")
-    read_vec = [False] * len(all_xids)
-    rendered = False
-    
     print("starting read loop...")
-    with open(paths.readlog, 'r') as f:
-        while True:
-            # read titles added so far
-            new_titles = False
-            for line in f:
-                line = line.strip()
-                # skip blanks and "<date>:" group headers; every other line is a
-                # bare paper id (see the data-format note in util.py).
-                if not line or line.endswith(":"):
-                    continue
-                new_titles = True
-                xid = line
+    read_vec = [False] * len(all_xids)
+    drawn = 0    # read papers reflected in the plot so far
+    rendered = False
+    while True:
+        # fold in reads recorded since the last poll
+        read = store.read_ids()
+        if len(read) > drawn or not rendered:
+            for xid in read:
                 if xid in all_xids:
                     read_vec[all_xids[xid]] = True
+            drawn = len(read)
+            show_vec = read_vec if size is None else read_vec[-4**size:]
+            vis = mp.hilbert(
+                data=show_vec,
+                color=(0.0, 1.0, 1.0),
+            )
+            if not rendered: # first time
+                print(vis)
+                rendered = True
+            else: # subsequent
+                print(f"\x1b[{vis.height}A{vis}")
 
-            # if there are new titles, redraw plot
-            if new_titles:
-                show_vec = read_vec if size is None else read_vec[-4**size:]
-                vis = mp.hilbert(
-                    data=show_vec,
-                    color=(0.0, 1.0, 1.0),
-                )
-                if not rendered: # first time
-                    print(vis)
-                    rendered = True
-                else: # subsequent
-                    print(f"\x1b[{vis.height}A{vis}")
-            
-            # otherwise wait until next poll
-            elif live:
-                time.sleep(3)
-
-            # or break
-            else:
-                break
+        # wait until the next poll, or finish
+        if not live:
+            break
+        time.sleep(3)
+        store.refresh_events()
 
 
 def scan_time(
@@ -249,10 +210,8 @@ def scan_time(
     tinted by each day's scanning time.
     """
     config = util.load_config(config_path)
-    paths = util.data_paths(config, data_dir=data_dir)
-    print("loading scan log...")
-    events = util.load_scanlog(path=paths.scanlog)
-    print(f"loaded {len(events)} events")
+    store = _store(config, data_dir)
+    events = store.scan_events()
     untimed = sum(1 for e in events if e.get("type") == "read-import")
     if untimed:
         print(f"skipping {untimed} papers without timing data")

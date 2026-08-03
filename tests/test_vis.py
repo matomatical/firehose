@@ -1,28 +1,38 @@
 """
-Smoke test for firehose.vis. The visualisation entry points read the cache and
-readlog off disk (no network), so one can be driven end-to-end against a tmp
-data dir. This guards the path-resolution wiring (config -> data_paths ->
-load_cache) -- the class of regression a util rename/removal silently introduces
-in an entry point that the pure-helper unit tests never call.
+Smoke test for firehose.vis. The visualisation entry points query the store
+off disk (no network), so one can be driven end-to-end against a tmp data
+dir. This guards the path-resolution wiring (config -> data_paths -> store)
+-- the class of regression a util rename/removal silently introduces in an
+entry point that the pure-helper unit tests never call.
 
 Plus unit tests for the renderers (render_scan_time, _scan_time_legend). The
 data-shaping these render is covered in test_stats.py.
 """
 import datetime
+import json
 
-from firehose import stats, util, vis
+from conftest import make_data_dir, make_doc
+from firehose import stats, vis
 
 
-def test_all_submitted_years_runs_against_tmp_cache(tmp_path, capsys):
-    (tmp_path / "config.toml").write_text('[paths]\ndata = "unused"\n')
-    cache = {
-        "2501.00001": datetime.date(2025, 1, 1),
-        "2601.00002": datetime.date(2026, 1, 2),
-    }
-    util.save_cache(str(tmp_path / "arxiv.txt"), datetime.date(2026, 1, 2), cache)
+def _config(tmp_path) -> str:
+    (tmp_path / "config.toml").write_text(
+        '[paths]\ndata = "unused"\n'
+        '[scan]\nmodern_cutoff = 2025-04-15\n'
+        '[arxiv]\ncategories = ["cs:cs:LG"]\n'
+    )
+    return str(tmp_path / "config.toml")
+
+
+def test_all_submitted_years_runs_against_tmp_store(tmp_path, capsys):
+    config_path = _config(tmp_path)
+    make_data_dir(tmp_path, [
+        make_doc("2501.00001", date="2025-01-01"),
+        make_doc("2601.00002", date="2026-01-02"),
+    ])
 
     vis.all_submitted_years(
-        config_path=str(tmp_path / "config.toml"),
+        config_path=config_path,
         data_dir=str(tmp_path),
     )
 
@@ -52,14 +62,18 @@ def test_scan_time_legend_names_both_ends():
 
 def test_scan_time_entry_point_runs_against_tmp_scanlog(tmp_path, capsys):
     # end-to-end through the shell (heatmap off, so no terminal needed): guards
-    # the config -> data_paths -> load_scanlog wiring, like the years smoke test.
-    (tmp_path / "config.toml").write_text('[paths]\ndata = "unused"\n')
-    util.log_event(str(tmp_path / "scanlog.jsonl"), {"type": "start", "n": 1})
-    util.log_event(str(tmp_path / "scanlog.jsonl"), {"type": "view", "xid": "a"})
-    util.log_event(str(tmp_path / "scanlog.jsonl"), {"type": "end"})
+    # the config -> data_paths -> store wiring, like the years smoke test.
+    config_path = _config(tmp_path)
+    with open(tmp_path / "scanlog.jsonl", "w") as f:
+        for event in [
+            {"t": "2026-06-22T11:00:00", "type": "start", "n": 1},
+            {"t": "2026-06-22T11:00:04", "type": "view", "xid": "a"},
+            {"t": "2026-06-22T11:00:10", "type": "end"},
+        ]:
+            f.write(json.dumps(event) + "\n")
 
     vis.scan_time(
-        config_path=str(tmp_path / "config.toml"),
+        config_path=config_path,
         data_dir=str(tmp_path),
         heatmap=False,
     )
@@ -69,32 +83,51 @@ def test_scan_time_entry_point_runs_against_tmp_scanlog(tmp_path, capsys):
 
 
 def test_scan_time_entry_point_no_scans(tmp_path, capsys):
-    (tmp_path / "config.toml").write_text('[paths]\ndata = "unused"\n')
+    config_path = _config(tmp_path)
     vis.scan_time(
-        config_path=str(tmp_path / "config.toml"),
+        config_path=config_path,
         data_dir=str(tmp_path),
         heatmap=False,
     )
     assert "no scans recorded yet." in capsys.readouterr().out
 
 
-def test_unread_entry_point_runs_against_tmp_data(tmp_path, capsys):
-    # drives the full cache + readlog + stats + calendar-render path off disk
-    (tmp_path / "config.toml").write_text(
-        '[paths]\ndata = "unused"\n[scan]\nmodern_cutoff = 2025-04-15\n'
+def test_scan_time_notes_untimed_imported_reads(tmp_path, capsys):
+    config_path = _config(tmp_path)
+    with open(tmp_path / "scanlog.jsonl", "w") as f:
+        for event in [
+            {"t": "2025-04-23", "type": "read-import", "xid": "old"},
+            {"t": "2026-06-22T11:00:00", "type": "start", "n": 1},
+            {"t": "2026-06-22T11:00:04", "type": "view", "xid": "a"},
+            {"t": "2026-06-22T11:00:10", "type": "end"},
+        ]:
+            f.write(json.dumps(event) + "\n")
+
+    vis.scan_time(
+        config_path=config_path,
+        data_dir=str(tmp_path),
+        heatmap=False,
     )
-    util.save_cache(str(tmp_path / "arxiv.txt"), datetime.date(2026, 1, 2), {
-        "2501.00001": datetime.date(2025, 1, 1),   # pre-cutoff: dropped
-        "2601.00002": datetime.date(2026, 1, 2),
-        "2601.00003": datetime.date(2026, 1, 2),
-    })
-    util.append_readlog(
-        str(tmp_path / "readlog.txt"),
-        "2601.00003", datetime.date(2026, 1, 3), None,
+    assert "skipping 1 papers without timing data" in capsys.readouterr().out
+
+
+def test_unread_entry_point_runs_against_tmp_data(tmp_path, capsys):
+    # drives the full store + stats + calendar-render path off disk
+    config_path = _config(tmp_path)
+    make_data_dir(
+        tmp_path,
+        [
+            make_doc("2501.00001", date="2025-01-01"),   # pre-cutoff: dropped
+            make_doc("2601.00002", date="2026-01-02"),
+            make_doc("2601.00003", date="2026-01-02"),
+        ],
+        events=[
+            {"t": "2026-01-03T10:00:00", "type": "view", "xid": "2601.00003"},
+        ],
     )
 
     vis.unread(
-        config_path=str(tmp_path / "config.toml"),
+        config_path=config_path,
         data_dir=str(tmp_path),
     )
 

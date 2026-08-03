@@ -1,25 +1,41 @@
 """
 Tests for firehose.sample: the pure functional core (the Scanner state machine
-and render_frame), the pure helpers (KEY_TO_COMMAND, select_papers), and the
-session-state sinks (Scanlog/Readlog/Downloads) on plain files with mocked I/O.
-No terminal, network, or clipboard.
+and render_frame), the key bindings (KEY_TO_COMMAND), and the effects run
+end-to-end against a store and the session managers (Downloads/Stopwatch) on
+plain files with mocked I/O. No terminal, network, or clipboard.
 """
 
-import datetime
 import json
-import random
 import re
 import textwrap
+import types
 
 import pytest
 import readchar
 
 from firehose import util
+from firehose.paper import Paper
 from firehose.sample import (
-    Scanner, Paper, Log, Clip, Open, MarkRead, Download, DeletePDF,
+    Scanner, Log, Clip, Open, Download, DeletePDF,
     PauseTimer, ResumeTimer, render_frame, KEY_TO_COMMAND, TRUNCATED_NOTICE,
-    Session, Scanlog, Readlog, Downloads, Stopwatch, select_papers, run_effects,
+    Session, Downloads, Stopwatch, run_effects,
 )
+from firehose.store import LocalStore
+
+
+def mksession(tmp_path) -> Session:
+    """A Session over a real LocalStore writing into tmp_path (the store's
+    index and mirror are never touched by the effect tests)."""
+    paths = types.SimpleNamespace(
+        scanlog=str(tmp_path / "scanlog.jsonl"),
+        index=str(tmp_path / "index.txt"),
+        mirror=str(tmp_path / "metadata"),
+    )
+    return Session(
+        store=LocalStore(paths, subscribed=set()),
+        downloads=Downloads(str(tmp_path / "dl")),
+        stopwatch=Stopwatch(),
+    )
 
 
 def mkpaper(i: int) -> Paper:
@@ -40,11 +56,6 @@ def mkpaper(i: int) -> Paper:
 
 def papers(n: int) -> list:
     return [mkpaper(i) for i in range(1, n + 1)]
-
-
-def _d(day: int) -> datetime.date:
-    """A date in May 2025 (after the modern cutoff), parameterised by day-of-month."""
-    return datetime.date(2025, 5, day)
 
 
 # -- key bindings --------------------------------------------------------------
@@ -71,94 +82,6 @@ def test_key_to_command_unknown_is_none():
     assert KEY_TO_COMMAND.get("1") is None
 
 
-# -- select_papers: filtering + ordering ---------------------------------------
-
-def test_select_papers_default_takes_last_n_newest_first():
-    cache = {f"p{i}": _d(i) for i in range(1, 6)}   # p1..p5 in cache order
-    out = select_papers(cache, read=set(), n=2)
-    # last two in cache order are p4, p5; returned reversed (newest first)
-    assert [xid for xid, _ in out] == ["p5", "p4"]
-
-
-def test_select_papers_backwards_takes_first_n_in_order():
-    cache = {f"p{i}": _d(i) for i in range(1, 6)}
-    out = select_papers(cache, read=set(), n=2, backwards=True)
-    assert [xid for xid, _ in out] == ["p1", "p2"]
-
-
-def test_select_papers_excludes_read():
-    cache = {f"p{i}": _d(i) for i in range(1, 6)}
-    out = select_papers(cache, read={"p4", "p5"}, n=2)
-    # candidates are p1,p2,p3; last two reversed -> p3, p2
-    assert [xid for xid, _ in out] == ["p3", "p2"]
-
-
-def test_select_papers_modern_filters_on_or_before_cutoff():
-    cache = {
-        "older": datetime.date(2024, 1, 1),     # dropped
-        "cutoff": datetime.date(2025, 4, 15),   # == cutoff, dropped (kept iff strictly after)
-        "new1": datetime.date(2025, 4, 16),     # kept
-        "new2": datetime.date(2025, 5, 1),      # kept
-    }
-    # with cutoff
-    papers_with_cutoff = select_papers(
-        cache,
-        set(),
-        n=10,
-        cutoff=datetime.date(2025, 4, 15),
-    )
-    assert {xid for xid, _ in papers_with_cutoff} == {"new1", "new2"}
-    # without cutoff
-    papers_without_cutoff = select_papers(
-        cache,
-        set(),
-        n=10,
-        cutoff=None,
-    )
-    assert {xid for xid, _ in papers_without_cutoff} == {
-        "older", "cutoff", "new1", "new2",
-    }
-
-
-def test_select_papers_offset_narrows_window_before_selecting():
-    cache = {f"p{i}": _d(i) for i in range(1, 6)}
-    # offset=3 -> last three candidates [p3,p4,p5]; backwards then takes first two
-    out = select_papers(cache, set(), n=2, offset=3, backwards=True)
-    assert [xid for xid, _ in out] == ["p3", "p4"]
-
-
-def test_select_papers_randomise_is_deterministic_with_seeded_rng():
-    cache = {f"p{i}": _d(i) for i in range(1, 6)}
-    out1 = select_papers(cache, set(), n=3, randomise=True, rng=random.Random(0))
-    out2 = select_papers(cache, set(), n=3, randomise=True, rng=random.Random(0))
-    assert len(out1) == 3
-    assert {xid for xid, _ in out1} <= {f"p{i}" for i in range(1, 6)}
-    assert out1 == out2   # same seed -> same draw
-
-
-def test_select_papers_randomise_returns_short_remaining_backlog():
-    cache = {f"p{i}": _d(i) for i in range(1, 4)}
-
-    out = select_papers(
-        cache, set(), n=100, randomise=True, rng=random.Random(0),
-    )
-
-    assert len(out) == 3
-    assert {xid for xid, _ in out} == {"p1", "p2", "p3"}
-
-
-def test_select_papers_randomise_empty_backlog_is_empty():
-    assert select_papers({}, set(), n=100, randomise=True) == []
-
-
-def test_select_papers_n_zero_or_negative_returns_empty():
-    # Guards the unread[-0:] == unread[:] trap: without the n<=0 short-circuit the
-    # default branch would return *all* candidates for n=0 (and slice oddly for n<0).
-    cache = {f"p{i}": _d(i) for i in range(1, 4)}
-    assert select_papers(cache, set(), n=0) == []
-    assert select_papers(cache, set(), n=-1) == []
-
-
 # -- Scanner: arrival / session ------------------------------------------------
 
 def test_start_emits_start_then_arrival():
@@ -166,7 +89,6 @@ def test_start_emits_start_then_arrival():
     fx = sc.start()
     assert fx == [
         Log({"type": "start", "n": 2}),
-        MarkRead(sc.xid),
         Log({"type": "view", "xid": sc.xid}),
     ]
     assert sc.nseen == 0
@@ -252,7 +174,6 @@ def test_forward_arrives_and_logs_new_paper():
     sc = Scanner(papers(2)); sc.start()
     fx = sc.feed("forward")
     assert sc.index == 1
-    assert MarkRead(sc.xid) in fx
     assert Log({"type": "view", "xid": sc.xid}) in fx
     assert sc.nseen == 1
 
@@ -268,12 +189,12 @@ def test_back_at_start_is_noop():
     assert sc.feed("back") == [] and sc.index == 0
 
 
-def test_revisit_does_not_relog_readlog():
-    sc = Scanner(papers(2)); sc.start()    # arrive p0 (readlog)
-    sc.feed("forward")                      # arrive p1 (readlog)
-    fx = sc.feed("back")                    # back to p0: view but NOT readlog
-    assert Log({"type": "view", "xid": sc.xid}) in fx
-    assert not any(isinstance(e, MarkRead) for e in fx)
+def test_revisit_logs_view_without_advancing_frontier():
+    sc = Scanner(papers(2)); sc.start()    # arrive p0
+    sc.feed("forward")                      # arrive p1
+    fx = sc.feed("back")                    # back to p0: a view, nseen stays
+    assert fx == [Log({"type": "view", "xid": sc.xid})]
+    assert sc.nseen == 1
 
 
 def test_quit_ends():
@@ -403,12 +324,7 @@ def test_render_truncation_accounts_for_wrapped_comment():
 def test_save_message_reports_clipboard_outcome(tmp_path, monkeypatch, copied, detail):
     monkeypatch.setattr(util, "copy_to_clipboard", lambda text: copied)
     sc = Scanner(papers(1)); sc.start()
-    session = Session(
-        scanlog=Scanlog(str(tmp_path / "scanlog.jsonl")),
-        readlog=Readlog(str(tmp_path / "readlog.txt")),
-        downloads=Downloads(str(tmp_path / "dl")),
-        stopwatch=Stopwatch(),
-    )
+    session = mksession(tmp_path)
 
     run_effects(sc, sc.feed("save"), session)
 
@@ -428,12 +344,7 @@ def test_download_message_keeps_complete_progress_bar(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(util, "copy_to_clipboard", lambda text: False)
     sc = Scanner(papers(1)); sc.start()
-    session = Session(
-        scanlog=Scanlog(str(tmp_path / "scanlog.jsonl")),
-        readlog=Readlog(str(tmp_path / "readlog.txt")),
-        downloads=Downloads(str(tmp_path / "dl")),
-        stopwatch=Stopwatch(),
-    )
+    session = mksession(tmp_path)
 
     effects = sc.feed("download")
     assert sc.message == "downloading..."
@@ -472,13 +383,10 @@ def test_navigation_resets_expanded():
 
 def test_effects_run_end_to_end(tmp_path, monkeypatch):
     # Drive the Scanner directly and run each emitted effect via its run(session)
-    # method with I/O mocked -- exercises Scanner + effects + the Session managers
-    # (Scanlog/Readlog/Downloads/Stopwatch) end to end, including the pause/resume
-    # timer effects. (The key-read half is covered by the KEY_TO_COMMAND tests.)
-    scanlog_path = tmp_path / "scanlog.jsonl"
-    readlog_path = tmp_path / "readlog.txt"
-    dl = tmp_path / "dl"
-
+    # method with I/O mocked -- exercises Scanner + effects + the store and
+    # Session managers (Downloads/Stopwatch) end to end, including the
+    # pause/resume timer effects. (The key-read half is covered by the
+    # KEY_TO_COMMAND tests.)
     monkeypatch.setattr(util, "copy_to_clipboard", lambda text: False)
     monkeypatch.setattr(util, "open_url", lambda url: False)
     def download(paper_id, path):
@@ -488,12 +396,7 @@ def test_effects_run_end_to_end(tmp_path, monkeypatch):
     monkeypatch.setattr(util, "download_paper", download)
 
     sc = Scanner(papers(1))
-    session = Session(
-        scanlog=Scanlog(str(scanlog_path)),
-        readlog=Readlog(str(readlog_path)),
-        downloads=Downloads(str(dl)),
-        stopwatch=Stopwatch(),
-    )
+    session = mksession(tmp_path)
 
     def run(effects):
         run_effects(sc, effects, session)
@@ -502,13 +405,16 @@ def test_effects_run_end_to_end(tmp_path, monkeypatch):
     for command in ["save", "remove", "pause", "pause", "download", "remove", "quit"]:
         run(sc.feed(command))
 
-    events = [json.loads(line)["type"] for line in scanlog_path.open()]
+    events = [
+        json.loads(line)["type"]
+        for line in (tmp_path / "scanlog.jsonl").open()
+    ]
     assert events == [
         "start", "view", "save", "remove", "pause", "resume",
         "download", "remove", "end",
     ]
-    assert list(dl.rglob("*.pdf")) == []          # PDF downloaded then deleted
-    assert list(util.load_readlog(str(readlog_path))[0]) == ["2601.00001"]  # logged once
+    assert list((tmp_path / "dl").rglob("*.pdf")) == []  # downloaded then deleted
+    assert session.store.read_ids() == {"2601.00001"}    # the view marked it seen
 
 
 def test_failed_download_is_not_logged_or_copied(tmp_path, monkeypatch):
@@ -522,12 +428,7 @@ def test_failed_download_is_not_logged_or_copied(tmp_path, monkeypatch):
     monkeypatch.setattr(util, "copy_to_clipboard", lambda text: copied.append(text))
 
     sc = Scanner(papers(1))
-    session = Session(
-        scanlog=Scanlog(str(scanlog_path)),
-        readlog=Readlog(str(tmp_path / "readlog.txt")),
-        downloads=Downloads(str(tmp_path / "dl")),
-        stopwatch=Stopwatch(),
-    )
+    session = mksession(tmp_path)
     run_effects(sc, sc.start(), session)
 
     with pytest.raises(RuntimeError, match="offline"):
@@ -539,28 +440,7 @@ def test_failed_download_is_not_logged_or_copied(tmp_path, monkeypatch):
     assert list((tmp_path / "dl").rglob("*.pdf")) == []
 
 
-# -- session sinks: Readlog / Downloads ----------------------------------------
-
-def test_readlog_appends_grouped_across_dates(tmp_path):
-    path = str(tmp_path / "readlog.txt")
-    d1, d2 = datetime.date(2026, 6, 20), datetime.date(2026, 6, 21)
-    rl = Readlog(path)
-    rl.log("a", d1)
-    rl.log("b", d1)   # same day -> no new header
-    rl.log("c", d2)   # new day -> header
-    assert open(path).read() == "2026-06-20:\na\nb\n2026-06-21:\nc\n"
-
-
-def test_readlog_resume_continues_open_group(tmp_path):
-    # a Readlog seeded with the readlog's last date (from load_readlog) continues
-    # that day's group on resume instead of duplicating the header
-    path = str(tmp_path / "readlog.txt")
-    d = datetime.date(2026, 6, 21)
-    Readlog(path).log("a", d)
-    _, open_date = util.load_readlog(path)
-    Readlog(path, open_date).log("b", d)   # resumed session, seeded from the file
-    assert open(path).read() == "2026-06-21:\na\nb\n"
-
+# -- session sinks: Downloads ---------------------------------------------------
 
 def _stub_downloader(monkeypatch):
     monkeypatch.setattr(

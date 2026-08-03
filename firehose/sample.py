@@ -1,32 +1,31 @@
 """
-The `firehose sample` command: download a batch of arXiv abstracts and present
-them to scan, recording views / saves / downloads.
+The `firehose sample` command: select a batch of unseen arXiv papers from the
+store and present their abstracts to scan, recording views / saves /
+downloads.
 
-* `sample()` is the entry point and describes the end-to-end pipeline at a high
-  level, loading papers and then presenting them in sequence.
+* `sample()` is the entry point and describes the end-to-end pipeline at a
+  high level, selecting papers and then presenting them in sequence.
 * The sequence presentation is driven by a functional core `Scanner` state
   machine taking commands and issuing effects, plus a pure render function
   `render_frame`.
 * Side-effects are carried out by each effect's `run()` method, acting on a
-  `Session` bundle of stateful managers (`Scanlog`, `Readlog`, `Downloads`,
-  `Stopwatch`).
+  `Session` bundle: the store (which records events) and stateful managers
+  (`Downloads`, `Stopwatch`).
 """
 
 import datetime
 import os
-import random
 import shutil
 import textwrap
 import time
 from dataclasses import dataclass
 
-import arxiv
 import matthewplotlib as mp
 import readchar
-import tqdm
 
 from firehose import util
 from firehose import vis
+from firehose.store import LocalStore
 
 
 # semantic scan commands keyed by raw keypress (readchar key constants are
@@ -65,105 +64,53 @@ def sample(
     randomise: bool = False,
     offset: int | None = None,
     modern: bool = True,
-    # arxiv api interaction
-    query_batch_size: int = 100,
-    query_wait_time: float = 3.5,
     # config
     config_path: str = util.CONFIG_PATH,
     data_dir: str | None = None,
     download_dir: str | None = None,
 ):
     """
-    Download and present abstracts for a batch of papers.
+    Select and present abstracts for a batch of unseen papers.
+
+    With --no-query, stop after previewing the selection's calendar.
     """
     config = util.load_config(config_path)
     paths = util.data_paths(config, data_dir=data_dir)
-    util.ensure_data_dir(paths)  # readlog/scanlog get written during the scan
+    util.ensure_data_dir(paths)  # the event log gets written during the scan
     download_dir = download_dir or config["paths"]["downloads"]
 
-    # load cached headers with overlapping classes
-    print("loading papers from disk...")
-    cache, _ = util.load_cache(path=paths.cache)
-    print(f"loaded {len(cache)} papers")
+    store = LocalStore(paths, subscribed=util.subscribed_categories(config))
 
-    # load read papers from read log
-    print("checking which have already been read...")
-    readlog, last_read_date = util.load_readlog(path=paths.readlog)
-    read = set(readlog)
-    print(f"loaded {len(read)} already-read papers")
-
-    # select which papers to scan
     print("selecting papers to scan...")
-    toread = select_papers(
-        cache,
-        read,
-        n=n,
+    papers = store.select_papers(
+        n,
         backwards=backwards,
         randomise=randomise,
         offset=offset,
         cutoff=config["scan"]["modern_cutoff"] if modern else None,
     )
-    print(f"selected {len(toread)} papers to scan")
+    print(f"selected {len(papers)} papers to scan")
 
     print("visualising on calendar...")
-    toread_dates = [date for xid, date in toread]
+    toread_dates = [p.published.date() for p in papers if p.published]
     print(vis.vis_dates(toread_dates))
 
     if not query:
         print("exiting.")
         return
 
-    # run the query
-    print("querying the API to get metadata for these papers...")
-    client = arxiv.Client(num_retries=0)
-    toread_xids = [xid for xid, _ in toread]
-    results = []
-    bar = tqdm.tqdm(
-        total=len(toread_xids),
-        unit="paper",
-        ncols=80,
-    )
-    for cursor in range(0, len(toread_xids), query_batch_size):
-        search = arxiv.Search(
-            id_list=toread_xids[cursor:cursor+query_batch_size],
-            max_results=query_batch_size,
-        )
-        try:
-            new_results = list(client.results(search))
-        except arxiv.HTTPError as e:
-            print(e)
-            raise e
-        results.extend(new_results)
-        bar.update(len(new_results))
-        if cursor+query_batch_size < len(toread_xids):
-            time.sleep(query_wait_time)
-    bar.close()
-
-    print("reordering results")
-    results_by_xid = {
-        r.entry_id[len("http://arxiv.org/abs/"):].split('v')[0]: r
-        for r in results
-    }
-    results_sorted = [
-        results_by_xid[xid]
-        for xid in toread_xids
-        if xid in results_by_xid
-    ]
-
-    if len(results_sorted) == 0:
+    if len(papers) == 0:
         print("no papers to show.")
         return
 
-    print("query complete. press q to cancel or anything else to start.")
+    print("press q to cancel or anything else to start.")
     if readchar.readkey() == "q":
         return
 
     # start scanning loop!
-    papers = [Paper.from_arxiv_result(r) for r in results_sorted]
     sc = Scanner(papers)
     session = Session(
-        scanlog=Scanlog(paths.scanlog),
-        readlog=Readlog(paths.readlog, last_read_date),
+        store=store,
         downloads=Downloads(download_dir),
         stopwatch=Stopwatch(),
     )
@@ -180,51 +127,7 @@ def sample(
     print("done!")
 
 
-# # # 
-# Paper selection algorithm
-
-
-def select_papers(
-    cache: dict[str, datetime.date],
-    read: set[str],
-    *,
-    n: int,
-    backwards: bool = False,
-    randomise: bool = False,
-    offset: int | None = None,
-    cutoff: datetime.date | None = None,
-    rng=random,
-) -> list[tuple[str, datetime.date]]:
-    """
-    Choose which (xid, date) papers to scan from the cache.
-
-    Drops already-read ids, then (when a `cutoff` is given) papers dated on or
-    before `cutoff`, then takes a window of size `n`:
-
-      * default:        the last `n` candidates, reversed (newest first);
-      * backwards=True:  the first `n` candidates, in cache order (oldest first);
-      * randomise=True:  up to `n` candidates drawn at random via `rng`.
-
-    `offset`, when given, first narrows to the last `offset` candidates (paging
-    back through older unread papers); `n <= 0` selects nothing. Pure: no I/O,
-    clock, or global RNG — pass a seeded `rng` for deterministic sampling in
-    tests.
-    """
-    if n <= 0:
-        return []
-    unread = [(xid, date) for xid, date in cache.items() if xid not in read]
-    if cutoff is not None:
-        unread = [(xid, date) for xid, date in unread if date > cutoff]
-    if offset is not None:
-        unread = unread[-offset:]
-    if backwards:
-        return unread[:n]
-    if randomise:
-        return rng.sample(unread, min(n, len(unread)))
-    return unread[-n:][::-1]
-
-
-# # # 
+# # #
 # Pure scanning loop state machine
 
 
@@ -264,12 +167,9 @@ class Scanner:
     def _arrive(self):
         # effects emitted when landing on the current paper
         self.expanded = False   # each new paper starts collapsed
-        effects = []
         if self.index > self.nseen:
             self.nseen = self.index
-            effects.append(MarkRead(self.xid))
-        effects.append(Log({"type": "view", "xid": self.xid}))
-        return effects
+        return [Log({"type": "view", "xid": self.xid})]
 
     def start(self):
         """Begin a session: a start event plus the first paper's arrival."""
@@ -390,49 +290,6 @@ class Scanner:
 
 
 # # # 
-# Paper object
-
-
-@dataclass
-class Paper:
-    xidv: str         # arxiv id with version, e.g. "2601.00001v1"
-    name: str         # util.to_name(result): "Author+Year Title"
-    entry_id: str
-    title: str
-    authors: list
-    categories: list
-    summary: str
-    published: object
-    updated: object
-    comment: object
-
-    @property
-    def xid(self) -> str:
-        """ArXiv id without version, e.g. "2601.00001"."""
-        # TODO: might break for old ids?
-        return self.xidv.split('v')[0]
-
-    @classmethod
-    def from_arxiv_result(cls, r) -> "Paper":
-        """
-        Build a Paper from an arxiv API result object.
-        """
-        xidv = r.entry_id[len("http://arxiv.org/abs/"):]
-        return cls(
-            xidv=xidv,
-            name=util.to_name(r),
-            entry_id=r.entry_id,
-            title=r.title,
-            authors=[str(a) for a in r.authors],
-            categories=[str(c) for c in r.categories],
-            summary=r.summary,
-            published=r.published,
-            updated=r.updated,
-            comment=r.comment,
-        )
-
-
-# # # 
 # Render scanning state
 
 
@@ -519,10 +376,9 @@ def render_frame(scanner, elapsed: float, *, rows: int | None = None):
 
 @dataclass
 class Session:
-    """The stateful per-session managers the effects act on, bundled so each
-    effect's run() takes a single context argument."""
-    scanlog: "Scanlog"
-    readlog: "Readlog"
+    """The store and stateful per-session managers the effects act on,
+    bundled so each effect's run() takes a single context argument."""
+    store: object
     downloads: "Downloads"
     stopwatch: "Stopwatch"
 
@@ -549,34 +405,6 @@ class Stopwatch:
         elif not paused and self._paused:
             self._segment_start = time.time()
             self._paused = False
-
-
-class Scanlog:
-    """
-    The scan event log for a session: appends each event as a JSON line to
-    scanlog.jsonl (util.log_event stamps it with the time on write).
-    """
-
-    def __init__(self, path):
-        self.path = path
-
-    def log(self, event):
-        util.log_event(self.path, event)
-
-
-class Readlog:
-    """
-    The seen-index for a scan session: appends each viewed id in grouped form
-    (a "<date>:" header only when the day changes). Seeded with the readlog's
-    last date (from load_readlog) so a same-day resume continues that group.
-    """
-
-    def __init__(self, path, open_date=None):
-        self.path = path
-        self._open_date = open_date
-
-    def log(self, xid, date):
-        self._open_date = util.append_readlog(self.path, xid, date, self._open_date)
 
 
 class Downloads:
@@ -618,11 +446,11 @@ class Downloads:
 
 @dataclass
 class Log:
-    """Append this event to the scan log (stamped with a time on write)."""
+    """Record this event in the store (stamped with a time on write)."""
     event: dict
 
     def run(self, session):
-        session.scanlog.log(self.event)
+        session.store.record_events([self.event])
 
 
 @dataclass
@@ -642,15 +470,6 @@ class Open:
     def run(self, session):
         if not util.open_url(self.url):
             print(f"no opener available; url: {self.url}")
-
-
-@dataclass
-class MarkRead:
-    """Append this paper id to the read log (readlog.txt)."""
-    xid: str
-
-    def run(self, session):
-        session.readlog.log(self.xid, datetime.date.today())
 
 
 @dataclass
