@@ -36,6 +36,7 @@ def all_submitted_dates(
 
 def unread(
     modern: bool = True,
+    source: str | None = None,
     config_path: str = util.CONFIG_PATH,
     data_dir: str | None = None,
     save_as: str | None = None,
@@ -44,16 +45,16 @@ def unread(
     Show unread papers by submission date on a calendar heatmap.
 
     Drops papers already seen and (with --modern, the default) those on or
-    before the modern cutoff, then renders the rest by submission date. This
-    is the calendar `sample` prints as its dry run, without any download.
-    Pass --no-modern to include the full backlog, --save-as to write the
-    calendar to an image.
+    before their source's modern cutoff, then renders the rest by
+    submission date. This is the calendar `sample` prints as its dry run,
+    without any download. Pass --no-modern to include the full backlog,
+    --source to narrow to one source, --save-as to write the calendar to
+    an image.
     """
     config = util.load_config(config_path)
     store = _store(config, data_dir)
 
-    cutoff = config["scan"]["modern_cutoff"] if modern else None
-    unread_dates = store.unread_dates(cutoff=cutoff)
+    unread_dates = store.unread_dates(modern=modern, source=source)
     print(f"found {len(unread_dates)} unread papers")
 
     print("printing calendar...")
@@ -433,19 +434,23 @@ def render_status(status: dict) -> str:
     else:
         lines.append(f"data: {status['data_dir']}")
     harvests = status.get("harvests", [])
-    watermark = status["watermark"]
-    if watermark is None:
-        lines.append("mirror: no index (run `firehose mirror`)")
-    else:
-        line = f"mirror: watermark {watermark}"
-        if harvests:
-            line += f", {harvests[-1]['papers']:,} papers"
+    for source, watermark in status["watermarks"].items():
+        if watermark is None:
+            lines.append(
+                f"mirror: {source}: no index (run `firehose mirror`)"
+            )
+            continue
+        line = f"mirror: {source}: watermark {watermark}"
+        source_harvests = [
+            h for h in harvests if h.get("source", "arxiv") == source
+        ]
+        if source_harvests:
+            line += f", {source_harvests[-1]['papers']:,} papers"
         lines.append(line)
-    if status["subscribed_papers"] is not None:
-        lines.append(
-            f"subscribed: {status['subscribed_papers']:,} papers, "
-            f"{status['seen_papers']:,} seen"
-        )
+    lines.append(
+        f"subscribed: {status['subscribed_papers']:,} papers, "
+        f"{status['seen_papers']:,} seen"
+    )
     line = f"events: {status['events']:,}"
     last = status.get("last_event")
     if last is not None:

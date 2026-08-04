@@ -1,8 +1,9 @@
 """
-Tests for firehose.store: the pure selection window (select_papers) and
-LocalStore end to end on a tmp data directory — selection with metadata,
-event recording and the derived seen-set, the log-tailing refresh, and the
-pre-shaped reading-state queries.
+Tests for firehose.store: the pure candidate filter (filter_unread) and
+selection window (select_papers), and LocalStore end to end on a tmp data
+directory — selection with metadata, event recording and the derived
+seen-set, the log-tailing refresh, and the pre-shaped reading-state
+queries.
 """
 
 import datetime
@@ -10,100 +11,117 @@ import json
 import random
 
 from conftest import make_data_dir, make_doc, make_store
-from firehose.store import select_papers
+from firehose.store import filter_unread, select_papers
 
 
 def _d(day: int) -> datetime.date:
-    """A date in May 2025 (after the modern cutoff), parameterised by day-of-month."""
+    """A date in May 2025, parameterised by day-of-month."""
     return datetime.date(2025, 5, day)
 
 
-# -- select_papers: filtering + ordering ---------------------------------------
+def _cache(n: int) -> dict[str, datetime.date]:
+    """arxiv:p1 .. arxiv:pn in cache order, dated by index."""
+    return {f"arxiv:p{i}": _d(i) for i in range(1, n + 1)}
+
+
+def _unread(n: int) -> list[tuple[str, datetime.date]]:
+    return filter_unread(_cache(n), read=set())
+
+
+# -- filter_unread: the candidate set -------------------------------------------
+
+def test_filter_unread_excludes_read():
+    out = filter_unread(_cache(5), read={"arxiv:p4", "arxiv:p5"})
+    assert [pid for pid, _ in out] == ["arxiv:p1", "arxiv:p2", "arxiv:p3"]
+
+
+def test_filter_unread_narrows_to_source():
+    cache = {
+        "arxiv:p1": _d(1), "lw:q1": _d(2), "arxiv:p2": _d(3),
+    }
+    assert [pid for pid, _ in filter_unread(cache, set(), source="lw")] == (
+        ["lw:q1"]
+    )
+    assert [pid for pid, _ in filter_unread(cache, set(), source="arxiv")] == (
+        ["arxiv:p1", "arxiv:p2"]
+    )
+
+
+def test_filter_unread_applies_per_source_cutoffs():
+    cache = {
+        "arxiv:older": datetime.date(2024, 1, 1),   # dropped
+        "arxiv:at": datetime.date(2025, 4, 15),     # == cutoff: dropped
+        "arxiv:new": datetime.date(2025, 4, 16),    # kept (strictly after)
+        "lw:old": datetime.date(2010, 1, 1),        # no lw cutoff: kept
+    }
+    cutoffs = {"arxiv": datetime.date(2025, 4, 15)}
+    assert {pid for pid, _ in filter_unread(cache, set(), cutoffs=cutoffs)} == {
+        "arxiv:new", "lw:old",
+    }
+    # no cutoffs mapping: the full backlog
+    assert len(filter_unread(cache, set())) == 4
+
+
+def test_filter_unread_source_and_cutoff_combine():
+    cache = {
+        "arxiv:old": datetime.date(2024, 1, 1),
+        "arxiv:new": datetime.date(2025, 5, 1),
+        "lw:new": datetime.date(2025, 5, 2),
+    }
+    out = filter_unread(
+        cache,
+        set(),
+        cutoffs={"arxiv": datetime.date(2025, 1, 1)},
+        source="arxiv",
+    )
+    assert [pid for pid, _ in out] == ["arxiv:new"]
+
+
+# -- select_papers: the selection window ----------------------------------------
 
 def test_select_papers_default_takes_last_n_newest_first():
-    cache = {f"p{i}": _d(i) for i in range(1, 6)}   # p1..p5 in cache order
-    out = select_papers(cache, read=set(), n=2)
+    out = select_papers(_unread(5), n=2)
     # last two in cache order are p4, p5; returned reversed (newest first)
-    assert [xid for xid, _ in out] == ["p5", "p4"]
+    assert [pid for pid, _ in out] == ["arxiv:p5", "arxiv:p4"]
 
 
 def test_select_papers_backwards_takes_first_n_in_order():
-    cache = {f"p{i}": _d(i) for i in range(1, 6)}
-    out = select_papers(cache, read=set(), n=2, backwards=True)
-    assert [xid for xid, _ in out] == ["p1", "p2"]
-
-
-def test_select_papers_excludes_read():
-    cache = {f"p{i}": _d(i) for i in range(1, 6)}
-    out = select_papers(cache, read={"p4", "p5"}, n=2)
-    # candidates are p1,p2,p3; last two reversed -> p3, p2
-    assert [xid for xid, _ in out] == ["p3", "p2"]
-
-
-def test_select_papers_modern_filters_on_or_before_cutoff():
-    cache = {
-        "older": datetime.date(2024, 1, 1),     # dropped
-        "cutoff": datetime.date(2025, 4, 15),   # == cutoff, dropped (kept iff strictly after)
-        "new1": datetime.date(2025, 4, 16),     # kept
-        "new2": datetime.date(2025, 5, 1),      # kept
-    }
-    # with cutoff
-    papers_with_cutoff = select_papers(
-        cache,
-        set(),
-        n=10,
-        cutoff=datetime.date(2025, 4, 15),
-    )
-    assert {xid for xid, _ in papers_with_cutoff} == {"new1", "new2"}
-    # without cutoff
-    papers_without_cutoff = select_papers(
-        cache,
-        set(),
-        n=10,
-        cutoff=None,
-    )
-    assert {xid for xid, _ in papers_without_cutoff} == {
-        "older", "cutoff", "new1", "new2",
-    }
+    out = select_papers(_unread(5), n=2, backwards=True)
+    assert [pid for pid, _ in out] == ["arxiv:p1", "arxiv:p2"]
 
 
 def test_select_papers_offset_narrows_window_before_selecting():
-    cache = {f"p{i}": _d(i) for i in range(1, 6)}
     # offset=3 -> last three candidates [p3,p4,p5]; backwards then takes first two
-    out = select_papers(cache, set(), n=2, offset=3, backwards=True)
-    assert [xid for xid, _ in out] == ["p3", "p4"]
+    out = select_papers(_unread(5), n=2, offset=3, backwards=True)
+    assert [pid for pid, _ in out] == ["arxiv:p3", "arxiv:p4"]
 
 
 def test_select_papers_randomise_is_deterministic_with_seeded_rng():
-    cache = {f"p{i}": _d(i) for i in range(1, 6)}
-    out1 = select_papers(cache, set(), n=3, randomise=True, rng=random.Random(0))
-    out2 = select_papers(cache, set(), n=3, randomise=True, rng=random.Random(0))
+    out1 = select_papers(_unread(5), n=3, randomise=True, rng=random.Random(0))
+    out2 = select_papers(_unread(5), n=3, randomise=True, rng=random.Random(0))
     assert len(out1) == 3
-    assert {xid for xid, _ in out1} <= {f"p{i}" for i in range(1, 6)}
+    assert {pid for pid, _ in out1} <= {f"arxiv:p{i}" for i in range(1, 6)}
     assert out1 == out2   # same seed -> same draw
 
 
 def test_select_papers_randomise_returns_short_remaining_backlog():
-    cache = {f"p{i}": _d(i) for i in range(1, 4)}
-
     out = select_papers(
-        cache, set(), n=100, randomise=True, rng=random.Random(0),
+        _unread(3), n=100, randomise=True, rng=random.Random(0),
     )
 
     assert len(out) == 3
-    assert {xid for xid, _ in out} == {"p1", "p2", "p3"}
+    assert {pid for pid, _ in out} == {f"arxiv:p{i}" for i in range(1, 4)}
 
 
 def test_select_papers_randomise_empty_backlog_is_empty():
-    assert select_papers({}, set(), n=100, randomise=True) == []
+    assert select_papers([], n=100, randomise=True) == []
 
 
 def test_select_papers_n_zero_or_negative_returns_empty():
     # Guards the unread[-0:] == unread[:] trap: without the n<=0 short-circuit the
     # default branch would return *all* candidates for n=0 (and slice oddly for n<0).
-    cache = {f"p{i}": _d(i) for i in range(1, 4)}
-    assert select_papers(cache, set(), n=0) == []
-    assert select_papers(cache, set(), n=-1) == []
+    assert select_papers(_unread(3), n=0) == []
+    assert select_papers(_unread(3), n=-1) == []
 
 
 # -- LocalStore: selection with metadata ----------------------------------------
@@ -279,7 +297,7 @@ def test_status_reports_store_state(tmp_path):
     status = store.status()
 
     assert status["data_dir"] == str(tmp_path)
-    assert status["watermark"] == "2026-01-02"
+    assert status["watermarks"] == {"arxiv": "2026-01-02"}
     assert status["subscribed_papers"] == 2
     assert status["seen_papers"] == 1
     assert status["events"] == 1
@@ -309,8 +327,8 @@ def test_status_on_empty_data_dir(tmp_path):
 
     status = store.status()
 
-    assert status["watermark"] is None
-    assert status["subscribed_papers"] is None
+    assert status["watermarks"] == {"arxiv": None}
+    assert status["subscribed_papers"] == 0
     assert status["seen_papers"] == 0
     assert status["events"] == 0
     assert status["last_event"] is None
@@ -348,14 +366,152 @@ def test_reading_state_queries(tmp_path):
     assert store.read_ids() == {"arxiv:2601.00001", "arxiv:2601.00002"}
 
 
-def test_unread_dates_respects_cutoff(tmp_path):
+def test_unread_dates_respects_source_cutoff(tmp_path):
     make_data_dir(tmp_path, [
         make_doc("2401.00001", date="2024-01-01"),
         make_doc("2601.00002", date="2026-01-02"),
     ])
-    store = make_store(tmp_path)
+    store = make_store(
+        tmp_path, modern_cutoff=datetime.date(2025, 4, 15),
+    )
 
-    assert len(store.unread_dates()) == 2
-    assert store.unread_dates(cutoff=datetime.date(2025, 4, 15)) == [
-        datetime.date(2026, 1, 2),
+    assert len(store.unread_dates(modern=False)) == 2
+    assert store.unread_dates() == [datetime.date(2026, 1, 2)]
+
+
+# -- LocalStore: multiple sources -------------------------------------------------
+
+class _FakeAdapter:
+    """A minimal second source ("fake"), single-sharded, subscribing to
+    everything: exercises the multi-source paths before a real second
+    adapter exists."""
+
+    source = "fake"
+
+    def shard(self, local_id):
+        return "all"
+
+    def subscription(self, section):
+        return lambda entry: True
+
+    def to_paper(self, doc):
+        from firehose.paper import Paper
+        return Paper(
+            id=f"fake:{doc['id']}",
+            xidv=doc["id"],
+            name=f"Fake {doc['id']}",
+            entry_id=f"https://fake.example/{doc['id']}",
+            title=doc["title"],
+            authors=[],
+            categories=[],
+            summary="",
+            published=None,
+            updated=None,
+            comment=None,
+            doc=doc,
+        )
+
+
+def _fake_source(tmp_path, docs: dict[str, datetime.date], monkeypatch):
+    """Install the fake adapter and write its index and mirror files."""
+    from firehose import index, mirror, sources
+
+    real_adapter = sources.adapter
+    monkeypatch.setattr(
+        sources,
+        "adapter",
+        lambda name: _FakeAdapter() if name == "fake" else real_adapter(name),
+    )
+    (tmp_path / "index").mkdir(exist_ok=True)
+    index.save_index(
+        path=str(tmp_path / "index" / "fake.txt"),
+        watermark=max(docs.values()),
+        entries={
+            local_id: index.Entry(date=date, categories=())
+            for local_id, date in docs.items()
+        },
+    )
+    mirror.save_shard(
+        str(tmp_path / "mirror" / "fake"),
+        "all",
+        {
+            local_id: {"id": local_id, "title": f"T {local_id}", "source": "fake"}
+            for local_id in docs
+        },
+    )
+
+
+def _two_source_store(tmp_path, fake_section=None):
+    from firehose import util
+    from firehose.store import LocalStore
+
+    paths = util.data_paths({"paths": {"data": str(tmp_path)}})
+    return LocalStore(paths, sources_config={
+        "arxiv": {"categories": ["cs:cs:LG"]},
+        "fake": fake_section or {},
+    })
+
+
+def test_multi_source_dates_merge_sorted(tmp_path, monkeypatch):
+    make_data_dir(tmp_path, [
+        make_doc("2601.00001", date="2026-01-01"),
+        make_doc("2601.00003", date="2026-01-03"),
+    ])
+    _fake_source(tmp_path, {
+        "q2": datetime.date(2026, 1, 2),
+        "q4": datetime.date(2026, 1, 4),
+    }, monkeypatch)
+    store = _two_source_store(tmp_path)
+
+    # merged and interleaved by (date, id) across sources
+    assert store.subscribed_ids() == [
+        "arxiv:2601.00001", "fake:q2", "arxiv:2601.00003", "fake:q4",
     ]
+    # newest-first selection mixes sources and builds each source's Paper
+    papers = store.select_papers(10)
+    assert [p.id for p in papers] == [
+        "fake:q4", "arxiv:2601.00003", "fake:q2", "arxiv:2601.00001",
+    ]
+    assert papers[0].title == "T q4"
+    assert papers[1].title == "Title 2601.00003"
+
+
+def test_multi_source_source_narrowing_and_cutoffs(tmp_path, monkeypatch):
+    make_data_dir(tmp_path, [make_doc("2601.00001", date="2026-01-01")])
+    _fake_source(tmp_path, {
+        "old": datetime.date(2025, 1, 1),
+        "new": datetime.date(2026, 1, 2),
+    }, monkeypatch)
+    store = _two_source_store(
+        tmp_path, fake_section={"modern_cutoff": datetime.date(2025, 6, 1)},
+    )
+
+    assert [p.id for p in store.select_papers(10, source="fake")] == [
+        "fake:new",   # fake:old is behind fake's cutoff
+    ]
+    assert [p.id for p in store.select_papers(10, source="fake", modern=False)] == [
+        "fake:new", "fake:old",
+    ]
+    # the fake cutoff does not touch the other source
+    assert len(store.select_papers(10)) == 2
+    assert store.unread_dates(source="fake") == [datetime.date(2026, 1, 2)]
+    # get_paper dispatches on the id's source
+    assert store.get_paper("fake:new").title == "T new"
+
+
+def test_multi_source_tolerates_unharvested_source(tmp_path, monkeypatch):
+    from firehose import sources
+
+    make_data_dir(tmp_path, [make_doc("2601.00001", date="2026-01-01")])
+    real_adapter = sources.adapter
+    monkeypatch.setattr(
+        sources,
+        "adapter",
+        lambda name: _FakeAdapter() if name == "fake" else real_adapter(name),
+    )
+    store = _two_source_store(tmp_path)   # "fake" configured, never harvested
+
+    assert store.subscribed_ids() == ["arxiv:2601.00001"]
+    assert store.status()["watermarks"] == {
+        "arxiv": "2026-01-01", "fake": None,
+    }

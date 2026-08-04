@@ -37,7 +37,8 @@ def create_app(store: LocalStore) -> FastAPI:
         randomise: bool = False,
         seed: int | None = None,
         offset: int | None = None,
-        cutoff: datetime.date | None = None,
+        modern: bool = True,
+        source: str | None = None,
     ) -> list[dict]:
         rng = random.Random(seed) if seed is not None else random
         selected = store.select_papers(
@@ -45,7 +46,8 @@ def create_app(store: LocalStore) -> FastAPI:
             backwards=backwards,
             randomise=randomise,
             offset=offset,
-            cutoff=cutoff,
+            modern=modern,
+            source=source,
             rng=rng,
         )
         return [p.doc for p in selected]
@@ -76,8 +78,13 @@ def create_app(store: LocalStore) -> FastAPI:
         return [d.isoformat() for d in store.submitted_dates()]
 
     @app.get("/stats/unread-dates")
-    def unread_dates(cutoff: datetime.date | None = None) -> list[str]:
-        return [d.isoformat() for d in store.unread_dates(cutoff=cutoff)]
+    def unread_dates(
+        modern: bool = True, source: str | None = None,
+    ) -> list[str]:
+        return [
+            d.isoformat()
+            for d in store.unread_dates(modern=modern, source=source)
+        ]
 
     @app.get("/stats/read-dates")
     def read_dates() -> list[str]:
@@ -121,7 +128,7 @@ def serve(
     port = port or server_config.get("listen_port", 8377)
 
     paths = util.data_paths(config, data_dir=data_dir)
-    store = LocalStore(paths, subscribed=util.subscribed_categories(config))
-    store.submitted_dates()   # touch the index so it loads now, not mid-request
+    store = LocalStore(paths, sources_config=config["sources"])
+    store.submitted_dates()   # touch the indexes so they load now, not mid-request
 
     uvicorn.run(create_app(store), host=host, port=port, log_level="info")

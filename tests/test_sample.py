@@ -28,7 +28,7 @@ def mksession(tmp_path) -> Session:
     index and mirror are never touched by the effect tests)."""
     paths = util.DataPaths(data_dir=str(tmp_path))
     return Session(
-        store=LocalStore(paths, subscribed=set()),
+        store=LocalStore(paths, sources_config={"arxiv": {"categories": []}}),
         downloads=Downloads(str(tmp_path / "dl")),
         stopwatch=Stopwatch(),
     )

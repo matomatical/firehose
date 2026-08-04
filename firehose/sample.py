@@ -64,6 +64,7 @@ def sample(
     randomise: bool = False,
     offset: int | None = None,
     modern: bool = True,
+    source: str | None = None,
     # config
     config_path: str = util.CONFIG_PATH,
     data_dir: str | None = None,
@@ -72,6 +73,8 @@ def sample(
     """
     Select and present abstracts for a batch of unseen papers.
 
+    With --no-modern, include each source's backlog (papers dated on or
+    before its configured cutoff); with --source, narrow to one source.
     With --no-query, stop after previewing the selection's calendar.
     """
     config = util.load_config(config_path)
@@ -84,7 +87,8 @@ def sample(
         backwards=backwards,
         randomise=randomise,
         offset=offset,
-        cutoff=config["scan"]["modern_cutoff"] if modern else None,
+        modern=modern,
+        source=source,
     )
     print(f"selected {len(papers)} papers to scan")
 

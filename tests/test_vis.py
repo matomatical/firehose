@@ -18,8 +18,8 @@ from firehose import stats, vis
 def _config(tmp_path) -> str:
     (tmp_path / "config.toml").write_text(
         '[paths]\ndata = "unused"\n'
-        '[scan]\nmodern_cutoff = 2025-04-15\n'
-        '[sources.arxiv]\ncategories = ["cs:cs:LG"]\n'
+        '[sources.arxiv]\nmodern_cutoff = 2025-04-15\n'
+        'categories = ["cs:cs:LG"]\n'
     )
     return str(tmp_path / "config.toml")
 
@@ -116,7 +116,7 @@ def test_render_status_remote_snapshot():
         "url": "http://nook:8377",
         "server_started": "2026-08-04T04:07:12.123456",
         "data_dir": "/srv/firehose/data",
-        "watermark": "2026-08-04",
+        "watermarks": {"arxiv": "2026-08-04"},
         "subscribed_papers": 910000,
         "seen_papers": 133200,
         "events": 133842,
@@ -143,7 +143,7 @@ def test_render_status_remote_snapshot():
         ],
     })
     assert "server: http://nook:8377 (running since 2026-08-04T04:07:12)" in out
-    assert "mirror: watermark 2026-08-04, 3,130,412 papers" in out
+    assert "mirror: arxiv: watermark 2026-08-04, 3,130,412 papers" in out
     assert "subscribed: 910,000 papers, 133,200 seen" in out
     assert "events: 133,842, last view arxiv:2508.01234 at 2026-08-04T09:12:33" in out
     assert (
@@ -157,15 +157,15 @@ def test_render_status_remote_snapshot():
 def test_render_status_empty_local_data_dir():
     out = vis.render_status({
         "data_dir": "/tmp/fresh",
-        "watermark": None,
-        "subscribed_papers": None,
+        "watermarks": {"arxiv": None},
+        "subscribed_papers": 0,
         "seen_papers": 0,
         "events": 0,
         "last_event": None,
         "harvests": [],
     })
     assert "data: /tmp/fresh" in out
-    assert "mirror: no index" in out
+    assert "mirror: arxiv: no index" in out
     assert "events: 0" in out
     assert "recent harvests: none recorded" in out
 
@@ -178,7 +178,7 @@ def test_status_entry_point_runs_against_tmp_store(tmp_path, capsys):
 
     out = capsys.readouterr().out
     assert f"data: {tmp_path}" in out
-    assert "mirror: watermark 2026-01-01" in out
+    assert "mirror: arxiv: watermark 2026-01-01" in out
     assert "subscribed: 1 papers, 0 seen" in out
     assert "recent harvests: none recorded" in out
 

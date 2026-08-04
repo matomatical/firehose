@@ -17,22 +17,6 @@ from dataclasses import dataclass
 # Reading-state shapes (from the paper cache and the readlog)
 
 
-def select_unread_dates(
-    cache: dict[str, datetime.date],
-    read: set[str],
-    cutoff: datetime.date | None = None,
-) -> list[datetime.date]:
-    """
-    Submission dates of the unread papers in the cache: those whose id is
-    not in `read` and (when a `cutoff` is given) dated after it. Order
-    follows the cache.
-    """
-    return [
-        date for xid, date in cache.items()
-        if xid not in read and (cutoff is None or date > cutoff)
-    ]
-
-
 def read_submit_dates(
     readlog: dict[str, datetime.date],
     cache: dict[str, datetime.date],

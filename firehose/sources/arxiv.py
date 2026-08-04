@@ -39,6 +39,12 @@ def _load_sickle():
         NoRecordsMatch = no_records_match
 
 
+def setspec_to_category(setspec: str) -> str:
+    """Translate an OAI setSpec (the form categories take in the config) to
+    a category name: "cs:cs:AI" -> "cs.AI", "physics:hep-th" -> "hep-th"."""
+    return ".".join(setspec.split(":")[1:])
+
+
 def _client():
     """An OAI client; retries ride out transient 503s (the server sets
     Retry-After) so long unattended runs survive them. The generous read
@@ -105,6 +111,13 @@ class ArxivAdapter:
         if "/" in xid:
             return xid.split("/", 1)[1][:4]
         return xid.split(".", 1)[0]
+
+    def subscription(self, section: dict):
+        """The subscribed-entry predicate from the [sources.arxiv] config
+        section: entries sharing a category with the section's
+        `categories` list (OAI setSpecs)."""
+        subscribed = {setspec_to_category(s) for s in section["categories"]}
+        return lambda entry: bool(set(entry.categories) & subscribed)
 
     def entry(self, doc: dict) -> index.Entry:
         """A paper's index entry: submission date and categories."""

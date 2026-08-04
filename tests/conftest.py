@@ -69,10 +69,24 @@ def make_data_dir(data_dir, docs: list[dict], events: list[dict] = ()) -> None:
                 f.write(json.dumps(event) + "\n")
 
 
-def make_store(data_dir, subscribed: set[str] = frozenset({"cs.LG"})):
-    """A LocalStore over `data_dir` (populate it with make_data_dir first)."""
+def make_store(
+    data_dir,
+    subscribed: set[str] = frozenset({"cs.LG"}),
+    modern_cutoff=None,
+):
+    """A LocalStore over `data_dir` (populate it with make_data_dir first),
+    subscribed to the given arXiv category names."""
     from firehose.store import LocalStore
 
     config = {"paths": {"data": str(data_dir)}}
     paths = util.data_paths(config)
-    return LocalStore(paths, subscribed=set(subscribed))
+    section = {
+        # category name -> the setSpec form the config carries
+        "categories": [
+            f"{name.split('.')[0]}:{name.replace('.', ':')}"
+            for name in subscribed
+        ],
+    }
+    if modern_cutoff is not None:
+        section["modern_cutoff"] = modern_cutoff
+    return LocalStore(paths, sources_config={"arxiv": section})

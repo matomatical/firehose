@@ -8,29 +8,6 @@ import datetime
 from firehose import stats
 
 
-# -- unread selection ----------------------------------------------------------
-
-def test_select_unread_dates_drops_read_and_pre_cutoff():
-    cache = {
-        "old":    datetime.date(2025, 1, 1),   # <= cutoff, dropped
-        "read":   datetime.date(2026, 1, 2),   # already read, dropped
-        "unread": datetime.date(2026, 1, 3),   # kept
-    }
-    dates = stats.select_unread_dates(
-        cache, read={"read"}, cutoff=datetime.date(2025, 6, 1),
-    )
-    assert dates == [datetime.date(2026, 1, 3)]
-
-
-def test_select_unread_dates_no_cutoff_keeps_full_backlog():
-    cache = {
-        "old":    datetime.date(2025, 1, 1),
-        "unread": datetime.date(2026, 1, 3),
-    }
-    dates = stats.select_unread_dates(cache, read=set(), cutoff=None)
-    assert sorted(dates) == [datetime.date(2025, 1, 1), datetime.date(2026, 1, 3)]
-
-
 # -- read papers resolved to submission dates -----------------------------------
 
 def test_read_submit_dates_resolves_and_drops_missing():

@@ -16,8 +16,8 @@ from firehose.server import create_app
 from firehose.store import RemoteStore
 
 
-def make_remote(tmp_path) -> RemoteStore:
-    app = create_app(make_store(tmp_path))
+def make_remote(tmp_path, **store_kwargs) -> RemoteStore:
+    app = create_app(make_store(tmp_path, **store_kwargs))
     return RemoteStore(
         "http://testserver",
         client=TestClient(app),
@@ -52,10 +52,16 @@ def test_select_papers_selection_options_forwarded(tmp_path):
     assert [p.xid for p in remote.select_papers(2, backwards=True)] == [
         "2601.00001", "2601.00002",
     ]
+    # the server's per-source modern cutoff applies; modern=False lifts it
+    cutoff_remote = make_remote(
+        tmp_path, modern_cutoff=datetime.date(2026, 1, 3),
+    )
     assert [
-        p.xid
-        for p in remote.select_papers(10, cutoff=datetime.date(2026, 1, 3))
+        p.xid for p in cutoff_remote.select_papers(10)
     ] == ["2601.00005", "2601.00004"]
+    assert len(cutoff_remote.select_papers(10, modern=False)) == 5
+    # source narrowing is forwarded (sole source: a no-op filter)
+    assert len(remote.select_papers(2, source="arxiv")) == 2
 
     # a seeded draw is deterministic across requests
     import random
@@ -114,7 +120,13 @@ def test_reading_state_queries_round_trip(tmp_path):
         datetime.date(2026, 1, 1), datetime.date(2026, 1, 2),
     ]
     assert remote.unread_dates() == [datetime.date(2026, 1, 2)]
-    assert remote.unread_dates(cutoff=datetime.date(2026, 1, 2)) == []
+    cutoff_remote = make_remote(
+        tmp_path, modern_cutoff=datetime.date(2026, 1, 2),
+    )
+    assert cutoff_remote.unread_dates() == []
+    assert cutoff_remote.unread_dates(modern=False) == [
+        datetime.date(2026, 1, 2),
+    ]
     assert remote.read_dates() == [datetime.date(2026, 1, 3)]
     assert remote.read_submit_dates() == [datetime.date(2026, 1, 1)]
     assert remote.subscribed_ids() == ["arxiv:2601.00001", "arxiv:2601.00002"]
@@ -208,7 +220,7 @@ def test_status_round_trip(tmp_path):
 
     assert status["url"] == "http://testserver"
     assert "server_started" in status
-    assert status["watermark"] == "2026-01-01"
+    assert status["watermarks"] == {"arxiv": "2026-01-01"}
     assert status["subscribed_papers"] == 1
     assert status["seen_papers"] == 1
     assert status["events"] == 1

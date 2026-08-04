@@ -14,11 +14,14 @@ of scanning, from which the seen-set is derived) — and `RemoteStore`
 answers over HTTP from a firehose server that runs a LocalStore on its own
 machine's data.
 
-Category subscription is a query-time filter: the index covers all of
-arXiv, and a LocalStore is constructed with the set of subscribed category
-names that selection and reading-state queries range over (`get_paper` is
-deliberately unrestricted). In remote mode the server's subscription
-applies.
+Subscription is a query-time filter: each source's index covers everything
+the source mirrors, and a LocalStore is constructed with the config's
+[sources] sections, whose adapters decide which index entries the
+selection and reading-state queries range over (`get_paper` is
+deliberately unrestricted). Each section may also set a `modern_cutoff`
+date: papers dated on or before it are dropped from selection unless a
+query asks for the full backlog (`modern=False`). In remote mode the
+server's subscriptions and cutoffs apply.
 """
 
 import contextlib
@@ -41,12 +44,6 @@ from firehose import util
 from firehose.paper import Paper
 
 
-# The sole source so far: the per-source data files (mirror shards, index)
-# are addressed by the adapter's name, and every paper is arXiv's until
-# further source adapters land.
-ARXIV = sources.adapter("arxiv")
-
-
 def make_store(config: dict, data_dir: str | None = None):
     """
     The store the config asks for: a RemoteStore on the [server] section's
@@ -58,28 +55,57 @@ def make_store(config: dict, data_dir: str | None = None):
     if url and data_dir is None:
         return RemoteStore(url, spool_path=util.data_paths(config).unsent)
     paths = util.data_paths(config, data_dir=data_dir)
-    return LocalStore(paths, subscribed=util.subscribed_categories(config))
+    return LocalStore(paths, sources_config=config["sources"])
+
+
+def filter_unread(
+    cache: dict[str, datetime.date],
+    read: set[str],
+    *,
+    cutoffs: dict[str, datetime.date] | None = None,
+    source: str | None = None,
+) -> list[tuple[str, datetime.date]]:
+    """
+    The unread candidates from the cache, in cache order: (id, date) pairs
+    whose id is not in `read`, narrowed to one source when `source` is
+    given, and (when `cutoffs` is given) dropping each paper dated on or
+    before its own source's cutoff — sources absent from the mapping keep
+    everything. Pure.
+    """
+    unread = [
+        (paper_id, date)
+        for paper_id, date in cache.items()
+        if paper_id not in read
+    ]
+    if source is not None:
+        unread = [
+            (paper_id, date) for paper_id, date in unread
+            if ids.source(paper_id) == source
+        ]
+    if cutoffs:
+        unread = [
+            (paper_id, date) for paper_id, date in unread
+            if (cutoff := cutoffs.get(ids.source(paper_id))) is None
+            or date > cutoff
+        ]
+    return unread
 
 
 def select_papers(
-    cache: dict[str, datetime.date],
-    read: set[str],
+    unread: list[tuple[str, datetime.date]],
     *,
     n: int,
     backwards: bool = False,
     randomise: bool = False,
     offset: int | None = None,
-    cutoff: datetime.date | None = None,
     rng=random,
 ) -> list[tuple[str, datetime.date]]:
     """
-    Choose which (xid, date) papers to scan from the cache.
-
-    Drops already-read ids, then (when a `cutoff` is given) papers dated on or
-    before `cutoff`, then takes a window of size `n`:
+    Choose which (id, date) papers to scan from the unread candidates
+    (see filter_unread): a window of size `n`:
 
       * default:        the last `n` candidates, reversed (newest first);
-      * backwards=True:  the first `n` candidates, in cache order (oldest first);
+      * backwards=True:  the first `n` candidates, in order (oldest first);
       * randomise=True:  up to `n` candidates drawn at random via `rng`.
 
     `offset`, when given, first narrows to the last `offset` candidates (paging
@@ -89,9 +115,6 @@ def select_papers(
     """
     if n <= 0:
         return []
-    unread = [(xid, date) for xid, date in cache.items() if xid not in read]
-    if cutoff is not None:
-        unread = [(xid, date) for xid, date in unread if date > cutoff]
     if offset is not None:
         unread = unread[-offset:]
     if backwards:
@@ -105,14 +128,24 @@ class LocalStore:
     """
     A Store over the data directory, in-process.
 
-    Construction loads the index (narrowed to the subscribed categories) and
-    the event log; queries then run against these in-memory structures, and
-    `record_events` keeps them in step as it appends to the log on disk.
+    Construction takes the config's [sources] sections and loads the event
+    log; the per-source indexes (each narrowed to its adapter's
+    subscription) load on first use. Queries then run against these
+    in-memory structures, and `record_events` keeps them in step as it
+    appends to the log on disk.
     """
 
-    def __init__(self, paths, subscribed: set[str]):
+    def __init__(self, paths, sources_config: dict[str, dict]):
         self._paths = paths
-        self._subscribed = subscribed
+        self._sources = {
+            name: (sources.adapter(name), section)
+            for name, section in sources_config.items()
+        }
+        self._cutoffs = {
+            name: section["modern_cutoff"]
+            for name, (_adapter, section) in self._sources.items()
+            if "modern_cutoff" in section
+        }
         self._lazy_dates: dict[str, datetime.date] | None = None
         self._events: list[dict] = []
         self._seen: dict[str, datetime.date] = {}   # id -> first-seen date
@@ -123,20 +156,31 @@ class LocalStore:
 
     @property
     def _dates(self) -> dict[str, datetime.date]:
-        """The subscribed view of the index: {namespaced id: submission
-        date}, in the index's (date, id) order. Loaded on first use
+        """The subscribed view of the indexes: {namespaced id: submission
+        date}, sorted by (date, id) across sources. Loaded on first use
         (queries that only touch the event log never pay for it); the full
-        index is not retained."""
+        indexes are not retained. A configured source with no index yet
+        (never harvested) contributes nothing, with a notice."""
         if self._lazy_dates is None:
-            print("loading index...")
-            entries, _ = index.load_index(self._paths.index(ARXIV.source))
-            self._lazy_dates = {
-                ids.join(ARXIV.source, xid): entry.date
-                for xid, entry in entries.items()
-                if set(entry.categories) & self._subscribed
-            }
-            print(f"indexed {len(self._lazy_dates)} papers "
-                  f"in {len(self._subscribed)} subscribed categories")
+            print("loading indexes...")
+            merged = []
+            for name, (adapter, section) in self._sources.items():
+                try:
+                    entries, _ = index.load_index(self._paths.index(name))
+                except FileNotFoundError:
+                    print(f"* {name}: no index yet (run `firehose mirror`)")
+                    continue
+                subscribed = adapter.subscription(section)
+                before = len(merged)
+                merged.extend(
+                    (ids.join(name, xid), entry.date)
+                    for xid, entry in entries.items()
+                    if subscribed(entry)
+                )
+                print(f"* {name}: subscribed to {len(merged) - before} "
+                      f"of {len(entries)} papers")
+            merged.sort(key=lambda pair: (pair[1], pair[0]))
+            self._lazy_dates = dict(merged)
         return self._lazy_dates
 
     # # #
@@ -149,35 +193,47 @@ class LocalStore:
         backwards: bool = False,
         randomise: bool = False,
         offset: int | None = None,
-        cutoff: datetime.date | None = None,
+        modern: bool = True,
+        source: str | None = None,
         rng=random,
     ) -> list[Paper]:
         """
         Choose up to `n` unseen subscribed papers (see the module-level
-        `select_papers` for the window semantics) and return them with full
-        metadata, decompressing each selected month once. A selected id
-        missing from the mirror (deleted upstream since the index was
-        built) is silently dropped.
+        `select_papers` for the window semantics; `modern` applies each
+        source's cutoff, `source` narrows to one source) and return them
+        with full metadata, decompressing each selected shard once. A
+        selected id missing from its mirror (deleted upstream since the
+        index was built) is silently dropped.
         """
         selected = select_papers(
-            self._dates,
-            set(self._seen),
+            filter_unread(
+                self._dates,
+                set(self._seen),
+                cutoffs=self._cutoffs if modern else None,
+                source=source,
+            ),
             n=n,
             backwards=backwards,
             randomise=randomise,
             offset=offset,
-            cutoff=cutoff,
             rng=rng,
         )
-        docs = mirror.read_papers(
-            self._paths.mirror(ARXIV.source),
-            [ids.local(paper_id) for paper_id, _date in selected],
-            shard_fn=ARXIV.shard,
-        )
+        by_source: dict[str, list[str]] = {}
+        for paper_id, _date in selected:
+            name, local_id = ids.split(paper_id)
+            by_source.setdefault(name, []).append(local_id)
+        papers = {}
+        for name, local_ids in by_source.items():
+            adapter, _section = self._sources[name]
+            docs = mirror.read_papers(
+                self._paths.mirror(name), local_ids, shard_fn=adapter.shard,
+            )
+            for local_id, doc in docs.items():
+                papers[ids.join(name, local_id)] = adapter.to_paper(doc)
         return [
-            ARXIV.to_paper(docs[ids.local(paper_id)])
+            papers[paper_id]
             for paper_id, _date in selected
-            if ids.local(paper_id) in docs
+            if paper_id in papers
         ]
 
     def get_paper(self, paper_id: str) -> Paper | None:
@@ -249,25 +305,25 @@ class LocalStore:
         """
         A JSON-clean snapshot of this store's data: the most recent harvest
         records (the tail of the harvest log the `mirror` command appends
-        to), the index watermark and subscribed paper count, and the event
-        log's size, seen-count, and last event. The logs are (re)read at
-        call time, so a long-running process reports harvests and events
-        that landed after it started. On a data directory with no index
-        yet, the index-derived fields are None.
+        to), each source's index watermark (None for a source not yet
+        harvested) and the subscribed paper count, and the event log's
+        size, seen-count, and last event. The logs are (re)read at call
+        time, so a long-running process reports harvests and events that
+        landed after it started.
         """
         self.refresh_events()
-        try:
-            watermark = index.load_watermark(
-                self._paths.index(ARXIV.source),
-            ).isoformat()
-            subscribed_papers = len(self._dates)
-        except FileNotFoundError:
-            watermark = None
-            subscribed_papers = None
+        watermarks = {}
+        for name in self._sources:
+            try:
+                watermarks[name] = index.load_watermark(
+                    self._paths.index(name),
+                ).isoformat()
+            except FileNotFoundError:
+                watermarks[name] = None
         return {
             "data_dir": self._paths.data_dir,
-            "watermark": watermark,
-            "subscribed_papers": subscribed_papers,
+            "watermarks": watermarks,
+            "subscribed_papers": len(self._dates),
             "seen_papers": len(self._seen),
             "events": len(self._events),
             "last_event": self._events[-1] if self._events else None,
@@ -282,12 +338,18 @@ class LocalStore:
         return list(self._dates.values())
 
     def unread_dates(
-        self, cutoff: datetime.date | None = None,
+        self, modern: bool = True, source: str | None = None,
     ) -> list[datetime.date]:
-        """Submission dates of the unseen subscribed papers."""
-        return stats.select_unread_dates(
-            self._dates, set(self._seen), cutoff=cutoff,
-        )
+        """Submission dates of the unseen subscribed papers (`modern`
+        applies each source's cutoff, `source` narrows to one source)."""
+        return [
+            date for _paper_id, date in filter_unread(
+                self._dates,
+                set(self._seen),
+                cutoffs=self._cutoffs if modern else None,
+                source=source,
+            )
+        ]
 
     def read_dates(self) -> list[datetime.date]:
         """Each seen paper's first-seen date, in first-seen order."""
@@ -378,13 +440,15 @@ class RemoteStore:
         backwards: bool = False,
         randomise: bool = False,
         offset: int | None = None,
-        cutoff: datetime.date | None = None,
+        modern: bool = True,
+        source: str | None = None,
         rng=random,
     ) -> list[Paper]:
         """
         Choose up to `n` unseen subscribed papers with full metadata; the
-        selection itself runs on the server (`rng` only draws the seed a
-        randomised order is requested under).
+        selection itself runs on the server, under the server's
+        subscriptions and cutoffs (`rng` only draws the seed a randomised
+        order is requested under).
         """
         docs = self._get(
             "/papers",
@@ -393,9 +457,10 @@ class RemoteStore:
             randomise=randomise,
             seed=rng.getrandbits(63) if randomise else None,
             offset=offset,
-            cutoff=cutoff.isoformat() if cutoff is not None else None,
+            modern=modern,
+            source=source,
         )
-        return [ARXIV.to_paper(doc) for doc in docs]
+        return [_doc_to_paper(doc) for doc in docs]
 
     def get_paper(self, paper_id: str) -> Paper | None:
         """One paper's metadata by namespaced id, any category; None if
@@ -407,7 +472,7 @@ class RemoteStore:
         if response.status_code == 404:
             return None
         response.raise_for_status()
-        return ARXIV.to_paper(response.json())
+        return _doc_to_paper(response.json())
 
     # # #
     # Events
@@ -522,11 +587,10 @@ class RemoteStore:
         return _dates(self._get("/stats/submitted-dates"))
 
     def unread_dates(
-        self, cutoff: datetime.date | None = None,
+        self, modern: bool = True, source: str | None = None,
     ) -> list[datetime.date]:
         return _dates(self._get(
-            "/stats/unread-dates",
-            cutoff=cutoff.isoformat() if cutoff is not None else None,
+            "/stats/unread-dates", modern=modern, source=source,
         ))
 
     def read_dates(self) -> list[datetime.date]:
@@ -543,6 +607,13 @@ class RemoteStore:
 
     def scan_events(self) -> list[dict]:
         return self._get("/stats/scan-events")
+
+
+def _doc_to_paper(doc: dict) -> Paper:
+    """A Paper from a document that travelled over the wire: the doc's
+    "source" field names the adapter that owns it (absent on arXiv
+    documents, which predate the field)."""
+    return sources.adapter(doc.get("source", "arxiv")).to_paper(doc)
 
 
 def _dates(datestamps: list[str]) -> list[datetime.date]:

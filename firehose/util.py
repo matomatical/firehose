@@ -113,20 +113,6 @@ def ensure_data_dir(paths: DataPaths) -> None:
     os.makedirs(paths.data_dir, exist_ok=True)
 
 
-def setspec_to_category(setspec: str) -> str:
-    """Translate an OAI setSpec (the form categories take in the config) to
-    a category name: "cs:cs:AI" -> "cs.AI", "physics:hep-th" -> "hep-th"."""
-    return ".".join(setspec.split(":")[1:])
-
-
-def subscribed_categories(config: dict) -> set[str]:
-    """The subscribed category names from the config's arXiv source."""
-    return {
-        setspec_to_category(s)
-        for s in config["sources"]["arxiv"]["categories"]
-    }
-
-
 # # #
 # File parsing utilities
 

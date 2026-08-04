@@ -18,6 +18,10 @@ work against:
   full batch size is the last.
 * `shard(id)` — which mirror archive holds this id (each source shards at
   a granularity to suit its volume).
+* `subscription(section)` — the subscribed-entry predicate for the
+  source's config section: which index entries the reading queries range
+  over (arXiv: category overlap; a broad source may subscribe to
+  everything).
 * `entry(doc)` — a mirrored document's index entry.
 * `datestamp(doc)` — when the upstream feed last touched the document
   (the axis the harvest watermark advances along).

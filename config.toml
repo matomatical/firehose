@@ -14,12 +14,6 @@ data = "data"
 # Override for a single run with --download-dir (resolved from the current dir).
 downloads = "downloads"
 
-[scan]
-# Papers submitted on or before this date are treated as "old" and dropped by
-# the default `sample` scan (`sample --no-modern` keeps them); roughly when I
-# started using firehose. Written as a bare date -- TOML parses it as a date.
-modern_cutoff = 2024-12-31
-
 [server]
 # Client side: when `url` is set, every command queries that firehose server
 # instead of local data files (an explicit --data-dir still means local).
@@ -33,9 +27,14 @@ listen_host = "100.82.212.8"
 listen_port = 8377
 
 # Each [sources.<name>] section configures one feed source. arXiv is the
-# only source so far.
+# only source so far. A section may set `modern_cutoff` (a bare date --
+# TOML parses it as a date): that source's papers dated on or before it
+# are treated as backlog and dropped by the default `sample` scan
+# (`sample --no-modern` keeps them).
 
 [sources.arxiv]
+# Roughly when I started using firehose.
+modern_cutoff = 2024-12-31
 # arXiv categories are OAI "setSpecs" (colon form, e.g. cs:cs:AI). Scanning
 # and the reading-state visualisations cover papers belonging to any
 # uncommented categories in the list below. The mirror stores all of arXiv
