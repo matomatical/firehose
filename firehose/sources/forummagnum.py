@@ -194,10 +194,10 @@ class ForumMagnumAdapter:
         authors = []
         user = raw.get("user")
         if user and user.get("displayName"):
-            authors.append(user["displayName"])
+            authors.append(_collapse(user["displayName"]))
         for coauthor in raw.get("coauthors") or ():
             if coauthor.get("displayName"):
-                authors.append(coauthor["displayName"])
+                authors.append(_collapse(coauthor["displayName"]))
         tags = []
         for tag in raw.get("tags") or ():
             slug = tag.get("slug")
@@ -216,7 +216,7 @@ class ForumMagnumAdapter:
         doc = {
             "id": raw["_id"],
             "source": self.source,
-            "title": (raw.get("title") or "").strip(),
+            "title": _collapse(raw.get("title") or ""),
             "slug": raw.get("slug"),
             "page_url": raw["pageUrl"],
             "posted_at": posted_at,
@@ -297,6 +297,13 @@ class ForumMagnumAdapter:
             comment=", ".join(numbers) if numbers else None,
             doc=doc,
         )
+
+
+def _collapse(text: str) -> str:
+    """Collapse internal whitespace runs (titles and names arrive with
+    stray newlines and doubled spaces) and strip the ends. The excerpt is
+    exempt: its paragraph breaks are meaningful."""
+    return " ".join(text.split())
 
 
 def _utc_today() -> datetime.date:

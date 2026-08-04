@@ -175,6 +175,15 @@ def test_parse_post_normalises_the_document():
     assert record.doc["excerpt"] == "An excerpt."
 
 
+def test_parse_post_collapses_whitespace_in_title_and_names():
+    record = LW._parse_post(_raw_post(
+        title="A Title:\nBroken  Across   Lines ",
+        user={"displayName": "Alice\nAuthor"},
+    ))
+    assert record.doc["title"] == "A Title: Broken Across Lines"
+    assert record.doc["authors"][0] == "Alice Author"
+
+
 def test_parse_post_omits_absent_fields():
     record = LW._parse_post(_raw_post(
         modifiedAt=None,
