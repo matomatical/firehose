@@ -116,13 +116,15 @@ def rebuild_index(
 
     config = util.load_config(config_path)
     paths = util.data_paths(config, data_dir=data_dir)
-    if not os.path.isdir(paths.mirror):
-        raise SystemExit(f"no mirror at {paths.mirror}; run `firehose mirror`")
+    mirror_dir = paths.mirror("arxiv")
+    index_path = paths.index("arxiv")
+    if not os.path.isdir(mirror_dir):
+        raise SystemExit(f"no mirror at {mirror_dir}; run `firehose mirror`")
 
     print("rebuilding index from the mirror...")
     entries = {}
     watermark = None
-    documents = mirror.iter_papers(paths.mirror)
+    documents = mirror.iter_papers(mirror_dir)
     for doc in tqdm.tqdm(documents, ncols=80, disable=None):
         entries[doc["id"]] = Entry(
             date=arxivraw.submitted_date(doc),
@@ -132,8 +134,9 @@ def rebuild_index(
         if watermark is None or datestamp > watermark:
             watermark = datestamp
     if watermark is None:
-        raise SystemExit(f"mirror at {paths.mirror} is empty")
+        raise SystemExit(f"mirror at {mirror_dir} is empty")
 
     print("saving index...")
-    save_index(path=paths.index, watermark=watermark, entries=entries)
+    os.makedirs(os.path.dirname(index_path), exist_ok=True)
+    save_index(path=index_path, watermark=watermark, entries=entries)
     print(f"saved {len(entries)} entries; watermark {watermark}")

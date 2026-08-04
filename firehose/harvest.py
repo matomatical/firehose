@@ -44,8 +44,11 @@ def mirror(
     """
     config = util.load_config(config_path)
     paths = util.data_paths(config, data_dir=data_dir)
+    mirror_dir = paths.mirror("arxiv")
+    index_path = paths.index("arxiv")
     util.ensure_data_dir(paths)
-    os.makedirs(paths.mirror, exist_ok=True)
+    os.makedirs(mirror_dir, exist_ok=True)
+    os.makedirs(os.path.dirname(index_path), exist_ok=True)
     _load_sickle()
     run_start = datetime.datetime.now().isoformat()
 
@@ -57,9 +60,9 @@ def mirror(
     sickle = Sickle(util.OAI_API_URL, max_retries=10, timeout=180)
 
     # load the index, or start a fresh mirror from the dawn of the archive
-    if os.path.exists(paths.index):
+    if os.path.exists(index_path):
         print("loading index...")
-        entries, watermark = index.load_index(paths.index)
+        entries, watermark = index.load_index(index_path)
         print(f"loaded {len(entries)} papers")
         print(f"* watermark: {watermark}")
     else:
@@ -101,7 +104,7 @@ def mirror(
         disable=None,
     )
     totals = collections.Counter()
-    updater = mirror_store.Updater(paths.mirror)
+    updater = mirror_store.Updater(mirror_dir)
     last_request_time = time.time()
     completed = False   # reached the end of the query (vs interrupted/partial)
     try:
@@ -159,7 +162,7 @@ def mirror(
                 bar.write("checkpoint: flushing mirror and saving index...")
                 updater.flush()
                 index.save_index(
-                    path=paths.index, watermark=watermark, entries=entries,
+                    path=index_path, watermark=watermark, entries=entries,
                 )
 
             if len(batch) < BATCH_SIZE:
@@ -181,7 +184,7 @@ def mirror(
         print("flushing mirror and saving index...")
         updater.flush()
         index.save_index(
-            path=paths.index, watermark=watermark, entries=entries,
+            path=index_path, watermark=watermark, entries=entries,
         )
         print(f"saved {len(entries)} entries; watermark {watermark}")
         _record_harvest(

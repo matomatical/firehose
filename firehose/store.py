@@ -39,6 +39,12 @@ from firehose import util
 from firehose.paper import Paper
 
 
+# The sole source so far: the per-source data files (mirror shards, index)
+# are addressed by source name, and every paper is arXiv's until further
+# source adapters land.
+ARXIV = "arxiv"
+
+
 def make_store(config: dict, data_dir: str | None = None):
     """
     The store the config asks for: a RemoteStore on the [server] section's
@@ -121,7 +127,7 @@ class LocalStore:
         retained."""
         if self._lazy_dates is None:
             print("loading index...")
-            entries, _ = index.load_index(self._paths.index)
+            entries, _ = index.load_index(self._paths.index(ARXIV))
             self._lazy_dates = {
                 xid: entry.date
                 for xid, entry in entries.items()
@@ -162,7 +168,7 @@ class LocalStore:
             rng=rng,
         )
         docs = mirror.read_papers(
-            self._paths.mirror, [xid for xid, _date in selected],
+            self._paths.mirror(ARXIV), [xid for xid, _date in selected],
         )
         return [
             Paper.from_mirror_doc(docs[xid])
@@ -172,7 +178,7 @@ class LocalStore:
 
     def get_paper(self, xid: str) -> Paper | None:
         """One paper's metadata, any category; None if not mirrored."""
-        doc = mirror.read_paper(self._paths.mirror, xid)
+        doc = mirror.read_paper(self._paths.mirror(ARXIV), xid)
         return Paper.from_mirror_doc(doc) if doc is not None else None
 
     # # #
@@ -242,7 +248,9 @@ class LocalStore:
         """
         self.refresh_events()
         try:
-            watermark = index.load_watermark(self._paths.index).isoformat()
+            watermark = index.load_watermark(
+                self._paths.index(ARXIV),
+            ).isoformat()
             subscribed_papers = len(self._dates)
         except FileNotFoundError:
             watermark = None

@@ -69,7 +69,7 @@ def _write_config(tmp_path):
 
 def test_rebuild_index_from_mirror(tmp_path):
     config_path = _write_config(tmp_path)
-    mirror_dir = str(tmp_path / "data" / "metadata")
+    mirror_dir = str(tmp_path / "data" / "mirror" / "arxiv")
     updater = mirror.Updater(mirror_dir)
     updater.upsert({
         "id": "2003.14184",
@@ -87,7 +87,7 @@ def test_rebuild_index_from_mirror(tmp_path):
 
     index.rebuild_index(config_path=config_path)
 
-    entries, watermark = index.load_index(str(tmp_path / "data" / "index.txt"))
+    entries, watermark = index.load_index(str(tmp_path / "data" / "index" / "arxiv.txt"))
     assert watermark == datetime.date(2026, 7, 28)
     assert entries == {
         "2003.14184": index.Entry(
@@ -105,6 +105,6 @@ def test_rebuild_index_refuses_missing_or_empty_mirror(tmp_path):
     config_path = _write_config(tmp_path)
     with pytest.raises(SystemExit):
         index.rebuild_index(config_path=config_path)
-    (tmp_path / "data" / "metadata").mkdir(parents=True)
+    (tmp_path / "data" / "mirror" / "arxiv").mkdir(parents=True)
     with pytest.raises(SystemExit):
         index.rebuild_index(config_path=config_path)

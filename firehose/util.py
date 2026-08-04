@@ -1,4 +1,5 @@
 import collections
+import dataclasses
 import datetime
 import json
 import os
@@ -8,7 +9,6 @@ import subprocess
 import sys
 import tempfile
 import tomllib
-import types
 
 import requests
 import tqdm
@@ -58,30 +58,59 @@ def load_config(path: str = CONFIG_PATH) -> dict:
     return config
 
 
+@dataclasses.dataclass(frozen=True)
+class DataPaths:
+    """
+    Where each data file lives under the data directory. The cross-source
+    files (the event log and its relatives, the harvest log) are fixed
+    paths; the mirror and index are per-source, keyed by source name
+    ("arxiv"), so each source keeps its own shard directory and watermark.
+    """
+
+    data_dir: str
+
+    def mirror(self, source: str) -> str:
+        """The source's mirror directory (its metadata shards)."""
+        return os.path.join(self.data_dir, "mirror", source)
+
+    def index(self, source: str) -> str:
+        """The source's index file (entries plus harvest watermark)."""
+        return os.path.join(self.data_dir, "index", f"{source}.txt")
+
+    @property
+    def events(self) -> str:
+        return os.path.join(self.data_dir, "events.jsonl")
+
+    @property
+    def harvests(self) -> str:
+        return os.path.join(self.data_dir, "harvests.jsonl")
+
+    @property
+    def unsent(self) -> str:
+        return os.path.join(self.data_dir, "unsent-events.jsonl")
+
+    @property
+    def readlog(self) -> str:  # retired format
+        return os.path.join(self.data_dir, "readlog.txt")
+
+
 def data_paths(
     config: dict,
     *,
     data_dir: str | None = None,
-) -> types.SimpleNamespace:
+) -> DataPaths:
     """
     Compute the data file paths, with an optional data-dir override; ~ is
     expanded. Pure: it does not touch the filesystem. Writers (harvest, sample)
     call ensure_data_dir first, since the data dir is gitignored and so absent
     on a fresh clone; readers (vis) don't need it to exist.
     """
-    data_dir = os.path.expanduser(data_dir or config["paths"]["data"])
-    return types.SimpleNamespace(
-        data_dir=data_dir,
-        readlog=os.path.join(data_dir, "readlog.txt"),  # retired format
-        events=os.path.join(data_dir, "events.jsonl"),
-        mirror=os.path.join(data_dir, "metadata"),
-        index=os.path.join(data_dir, "index.txt"),
-        harvests=os.path.join(data_dir, "harvests.jsonl"),
-        unsent=os.path.join(data_dir, "unsent-events.jsonl"),
+    return DataPaths(
+        data_dir=os.path.expanduser(data_dir or config["paths"]["data"]),
     )
 
 
-def ensure_data_dir(paths: types.SimpleNamespace) -> None:
+def ensure_data_dir(paths: DataPaths) -> None:
     """Create the data directory (from data_paths) if absent, so a writer can
     file into it. Separated from data_paths so path computation stays pure."""
     os.makedirs(paths.data_dir, exist_ok=True)
@@ -94,8 +123,11 @@ def setspec_to_category(setspec: str) -> str:
 
 
 def subscribed_categories(config: dict) -> set[str]:
-    """The subscribed category names from the config."""
-    return {setspec_to_category(s) for s in config["arxiv"]["categories"]}
+    """The subscribed category names from the config's arXiv source."""
+    return {
+        setspec_to_category(s)
+        for s in config["sources"]["arxiv"]["categories"]
+    }
 
 
 # # #

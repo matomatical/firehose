@@ -44,7 +44,7 @@ def make_data_dir(data_dir, docs: list[dict], events: list[dict] = ()) -> None:
     its "t" timestamp) onto the event log.
     """
     entries = {}
-    updater = mirror.Updater(str(data_dir / "metadata"))
+    updater = mirror.Updater(str(data_dir / "mirror" / "arxiv"))
     for doc in docs:
         updater.upsert(doc)
         entries[doc["id"]] = index.Entry(
@@ -53,8 +53,9 @@ def make_data_dir(data_dir, docs: list[dict], events: list[dict] = ()) -> None:
         )
     updater.flush()
     if entries:
+        (data_dir / "index").mkdir(exist_ok=True)
         index.save_index(
-            path=str(data_dir / "index.txt"),
+            path=str(data_dir / "index" / "arxiv.txt"),
             watermark=max(entry.date for entry in entries.values()),
             entries=entries,
         )

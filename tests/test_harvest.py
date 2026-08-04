@@ -120,9 +120,9 @@ def test_mirror_end_to_end_then_resumes_from_watermark(tmp_path, monkeypatch):
 
     harvest_module.mirror(config_path=config_path)
 
-    doc = mirror_store.read_paper(str(data_dir / "metadata"), "2606.00001")
+    doc = mirror_store.read_paper(str(data_dir / "mirror" / "arxiv"), "2606.00001")
     assert doc["title"] == "T"
-    entries, watermark = index.load_index(str(data_dir / "index.txt"))
+    entries, watermark = index.load_index(str(data_dir / "index" / "arxiv.txt"))
     assert watermark == datetime.date(2026, 6, 3)
     assert set(entries) == {"2606.00001"}
 
@@ -136,7 +136,7 @@ def test_mirror_end_to_end_then_resumes_from_watermark(tmp_path, monkeypatch):
         ),
     ], expect_identify=False)
     harvest_module.mirror(config_path=config_path)
-    entries, watermark = index.load_index(str(data_dir / "index.txt"))
+    entries, watermark = index.load_index(str(data_dir / "index" / "arxiv.txt"))
     assert set(entries) == {"2606.00001", "2606.00002"}
     assert watermark == datetime.date(2026, 6, 4)
 
@@ -190,6 +190,6 @@ def test_mirror_survives_malformed_record(tmp_path, monkeypatch):
 
     harvest_module.mirror(config_path=config_path)
 
-    entries, watermark = index.load_index(str(data_dir / "index.txt"))
+    entries, watermark = index.load_index(str(data_dir / "index" / "arxiv.txt"))
     assert set(entries) == {"2606.00014"}
     assert watermark == datetime.date(2026, 6, 3)

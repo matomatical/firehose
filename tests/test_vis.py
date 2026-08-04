@@ -19,7 +19,7 @@ def _config(tmp_path) -> str:
     (tmp_path / "config.toml").write_text(
         '[paths]\ndata = "unused"\n'
         '[scan]\nmodern_cutoff = 2025-04-15\n'
-        '[arxiv]\ncategories = ["cs:cs:LG"]\n'
+        '[sources.arxiv]\ncategories = ["cs:cs:LG"]\n'
     )
     return str(tmp_path / "config.toml")
 

@@ -32,7 +32,10 @@ url = "http://100.82.212.8:8377"
 listen_host = "100.82.212.8"
 listen_port = 8377
 
-[arxiv]
+# Each [sources.<name>] section configures one feed source. arXiv is the
+# only source so far.
+
+[sources.arxiv]
 # arXiv categories are OAI "setSpecs" (colon form, e.g. cs:cs:AI). Scanning
 # and the reading-state visualisations cover papers belonging to any
 # uncommented categories in the list below. The mirror stores all of arXiv

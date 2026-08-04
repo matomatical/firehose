@@ -132,7 +132,7 @@ self-documenting.
 Every key in the shipped file is required (else the script might crash), so the
 easiest way to start is to edit the one that's already there.
 
-* `arxiv.categories` is the list of categories you subscribe to, as arXiv OAI
+* `sources.arxiv.categories` is the list of categories you subscribe to, as arXiv OAI
   "setSpecs" in colon form (e.g. `cs:cs:AI`, `stat:stat:ML`). For reference,
   `firehose classes` prints arXiv's full catalog of setSpecs and names.
 
@@ -187,8 +187,8 @@ Daily usage:
 
 `firehose mirror` creates and updates a full local mirror of arXiv paper
 metadata (all categories, ~3M papers, ~2GB on disk): one gzipped JSON-lines
-archive per submission month under `data/metadata/`, plus a derived
-plain-text index (`data/index.txt`) of every paper's id, submission date,
+archive per submission month under `data/mirror/arxiv/`, plus a derived
+plain-text index (`data/index/arxiv.txt`) of every paper's id, submission date,
 and categories. Everything else — scanning, selection, the visualisations —
 runs against this local mirror, so nothing but `mirror` itself ever touches
 the network for metadata.
@@ -352,14 +352,14 @@ Data files
 Everything firehose knows lives in plain files under `data/`, all greppable
 and hand-editable:
 
-* **`metadata/`**: the mirror: one gzipped JSON-lines archive per submission
-  month (`metadata/<YYMM>.jsonl.gz`), one document per line holding a
-  paper's title, authors, abstract, categories, comments, and per-version
-  dates. Written by `mirror`; readable with the usual line tools
-  (`zgrep 2507.12345 data/metadata/2507.jsonl.gz` returns the whole
+* **`mirror/arxiv/`**: the mirror: one gzipped JSON-lines archive per
+  submission month (`mirror/arxiv/<YYMM>.jsonl.gz`), one document per line
+  holding a paper's title, authors, abstract, categories, comments, and
+  per-version dates. Written by `mirror`; readable with the usual line tools
+  (`zgrep 2507.12345 data/mirror/arxiv/2507.jsonl.gz` returns the whole
   document, `zcat ... | jq` pretty-prints a month).
-* **`index.txt`**: derived from the mirror: a `latest datestamp:` watermark,
-  then each paper's id and categories grouped under `<date>:`
+* **`index/arxiv.txt`**: derived from the mirror: a `latest datestamp:`
+  watermark, then each paper's id and categories grouped under `<date>:`
   (submission-date) headers. Rebuildable at any time with
   `firehose rebuild-index`.
 * **`events.jsonl`**: an append-only event log, one JSON object per line

@@ -25,15 +25,15 @@ from firehose import util
 def test_data_paths_from_config():
     p = util.data_paths({"paths": {"data": "mydata"}})
     assert p.data_dir == "mydata"
-    assert p.index == os.path.join("mydata", "index.txt")
-    assert p.mirror == os.path.join("mydata", "metadata")
+    assert p.index("arxiv") == os.path.join("mydata", "index", "arxiv.txt")
+    assert p.mirror("arxiv") == os.path.join("mydata", "mirror", "arxiv")
     assert p.events == os.path.join("mydata", "events.jsonl")
 
 
 def test_data_paths_override_wins():
     p = util.data_paths({"paths": {"data": "mydata"}}, data_dir="other")
     assert p.data_dir == "other"
-    assert p.index == os.path.join("other", "index.txt")
+    assert p.index("arxiv") == os.path.join("other", "index", "arxiv.txt")
 
 
 def test_data_paths_expands_user():

@@ -171,7 +171,7 @@ def test_select_papers_drops_ids_missing_from_mirror(tmp_path):
     from firehose import mirror
 
     make_data_dir(tmp_path, [make_doc("2601.00001"), make_doc("2601.00002")])
-    updater = mirror.Updater(str(tmp_path / "metadata"))
+    updater = mirror.Updater(str(tmp_path / "mirror" / "arxiv"))
     updater.delete("2601.00001")
     updater.flush()
     store = make_store(tmp_path)
