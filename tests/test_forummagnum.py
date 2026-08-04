@@ -263,6 +263,58 @@ def test_apply_moves_a_document_whose_posted_date_changed(tmp_path):
     assert entries["abc123Xyz"].date == datetime.date(2026, 8, 1)
 
 
+# -- grab (on-demand full text) -----------------------------------------------------
+
+
+def test_filename_carries_source_and_id():
+    paper = LW.to_paper(LW._parse_post(_raw_post()).doc)
+    assert LW.filename(paper) == (
+        "Author+Both2026 A Post [lw_abc123Xyz].html"
+    )
+
+
+def test_grab_files_a_self_contained_page(tmp_path, monkeypatch):
+    def fake_post(url, json=None, headers=None, timeout=None):
+        assert '"abc123Xyz"' in json["query"]
+        return types.SimpleNamespace(
+            raise_for_status=lambda: None,
+            json=lambda: {"data": {"post": {"result": {
+                "title": "A Post <escaped>",
+                "htmlBody": "<p>Full text.</p>",
+            }}}},
+        )
+
+    monkeypatch.setattr(forummagnum.requests, "post", fake_post)
+    monkeypatch.setattr(forummagnum.time, "sleep", lambda _: None)
+    paper = LW.to_paper(LW._parse_post(_raw_post()).doc)
+    path = str(tmp_path / "grabbed.html")
+
+    message = LW.grab(paper, path)
+
+    page = open(path, encoding="utf-8").read()
+    assert "<p>Full text.</p>" in page                      # body verbatim
+    assert "A Post &lt;escaped&gt;" in page                 # title escaped
+    assert paper.entry_id in page                           # link back
+    assert message.startswith("downloaded ★")
+
+
+def test_grab_of_a_vanished_post_raises(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        forummagnum.requests, "post",
+        lambda url, json=None, headers=None, timeout=None: types.SimpleNamespace(
+            raise_for_status=lambda: None,
+            json=lambda: {"data": {"post": {"result": None}}},
+        ),
+    )
+    monkeypatch.setattr(forummagnum.time, "sleep", lambda _: None)
+    paper = LW.to_paper(LW._parse_post(_raw_post()).doc)
+    path = str(tmp_path / "grabbed.html")
+
+    with pytest.raises(RuntimeError, match="no longer exists"):
+        LW.grab(paper, path)
+    assert not (tmp_path / "grabbed.html").exists()
+
+
 def test_adapter_registry_covers_both_sites():
     assert sources.adapter("lw").graphql_url.startswith(
         "https://www.lesswrong.com"

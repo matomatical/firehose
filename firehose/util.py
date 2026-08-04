@@ -7,20 +7,11 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import tomllib
-
-import requests
-import tqdm
 
 
 # firehose config
 CONFIG_PATH = "config.toml"
-
-# Connect and per-chunk read timeouts for PDF downloads, in seconds. The read
-# timeout is not a cap on the whole download; it bounds how long the server may
-# stop sending bytes before Requests raises.
-DOWNLOAD_TIMEOUT = (10, 60)
 
 
 # # # 
@@ -213,76 +204,15 @@ def to_datestamp(date: datetime.date) -> str:
     return date.strftime('%Y-%m-%d')
 
 
-# # # 
-# ArXiv paper handling utilities
+# # #
+# Download filename utilities
 
 
-def to_filename(name: str, xidv: str) -> str:
-    return re.sub(r"[^\w ?+,'()\[\]\-]", "_", f"{name} [{xidv}]") + ".pdf"
-
-
-def download_paper(paper_id: str, path: str) -> str:
-    """Download an arXiv PDF atomically to `path`.
-
-    HTTP errors and stalled transfers raise without creating or replacing the
-    destination. The response is streamed to a temporary file in the same
-    directory, then moved into place only after the complete body is received.
-    Returns the completed progress meter for the scanner to keep on screen.
-    """
-    url = f"https://arxiv.org/pdf/{paper_id}.pdf"
-    temp_path = None
-    try:
-        with requests.get(
-            url,
-            stream=True,
-            timeout=DOWNLOAD_TIMEOUT,
-        ) as response:
-            response.raise_for_status()
-            try:
-                content_length = response.headers.get("content-length")
-                total = int(content_length) if content_length is not None else None
-            except (TypeError, ValueError):
-                total = None
-
-            parent = os.path.dirname(os.path.abspath(path))
-            with tempfile.NamedTemporaryFile(
-                mode="wb",
-                dir=parent,
-                prefix=".firehose-",
-                suffix=".part",
-                delete=False,
-            ) as file:
-                temp_path = file.name
-                with tqdm.tqdm(
-                    desc="downloading...",
-                    total=total,
-                    unit="iB",
-                    unit_scale=True,
-                    unit_divisor=1024,
-                    ncols=80,
-                ) as bar:
-                    for data in response.iter_content(chunk_size=64 * 1024):
-                        if data:
-                            bar.update(file.write(data))
-
-            # A response without Content-Length has no percentage while it is
-            # in flight. Once EOF is reached, the received byte count is the
-            # known total, so its persistent final meter can still show 100%.
-            if bar.total is None:
-                bar.total = bar.n
-            bar.desc = "downloaded ★"
-            completed_progress = str(bar)
-
-        assert temp_path is not None
-        os.replace(temp_path, path)
-        temp_path = None
-        return completed_progress
-    finally:
-        if temp_path is not None:
-            try:
-                os.remove(temp_path)
-            except FileNotFoundError:
-                pass
+def to_filename(name: str, tag: str, extension: str) -> str:
+    """A safe download filename, '<name> [<tag>]<extension>': characters
+    outside a conservative whitelist are replaced with underscores (the
+    extension is appended verbatim)."""
+    return re.sub(r"[^\w ?+,'()\[\]\-]", "_", f"{name} [{tag}]") + extension
 
 
 # # # 

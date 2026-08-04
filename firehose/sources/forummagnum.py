@@ -7,7 +7,8 @@ Posts are fetched from the site's GraphQL "views" API in monthly
 `postedAt` windows; each fetch re-pulls a trailing month so karma, comment
 counts, and edits refresh for recent posts (idempotent upserts absorb the
 overlap). Documents are post metadata plus a plaintext excerpt — the post
-body is not mirrored. The mirror shards by posted month, and the index
+body is not mirrored; grabbing a post fetches its full `htmlBody` at that
+moment instead. The mirror shards by posted month, and the index
 carries tag slugs plus "~"-prefixed pseudo-tags for the site's own flags
 (so e.g. Alignment Forum membership is a query-time filter, and the "~"
 keeps the flags clear of the sites' user-created tag slugs).
@@ -31,12 +32,16 @@ Caveats this adapter works around or accepts:
 """
 
 import datetime
+import html
+import json
+import os
 import time
 
 import requests
 
 from firehose import ids
 from firehose import index
+from firehose import util
 from firehose.paper import Paper, to_name
 from firehose.sources import Record
 
@@ -138,23 +143,15 @@ class ForumMagnumAdapter:
                 yield batch
             month = next_month
 
-    def _window(self, after: datetime.date, before: datetime.date):
-        """One window's posts, retrying transport failures. A full window
-        hit the truncation cap, and a post dated outside the window means
-        the server ignored the terms; both are errors."""
-        payload = {
-            "query": _POSTS_QUERY_TEMPLATE % {
-                "after": after.isoformat(),
-                "before": before.isoformat(),
-                "limit": WINDOW_CAP,
-            },
-        }
+    def _graphql(self, query: str) -> dict:
+        """POST one GraphQL query and return its "data", retrying transport
+        failures; GraphQL errors (schema drift) are fatal immediately."""
         for attempt, pause in enumerate(REQUEST_RETRY_WAITS, start=1):
             time.sleep(pause)
             try:
                 response = requests.post(
                     self.graphql_url,
-                    json=payload,
+                    json={"query": query},
                     headers={"User-Agent": USER_AGENT},
                     timeout=REQUEST_TIMEOUT,
                 )
@@ -168,7 +165,18 @@ class ForumMagnumAdapter:
             raise RuntimeError(
                 f"GraphQL errors from {self.graphql_url}: {body['errors']!r}"
             )
-        results = body["data"]["posts"]["results"]
+        return body["data"]
+
+    def _window(self, after: datetime.date, before: datetime.date):
+        """One window's posts. A full window hit the truncation cap, and a
+        post dated outside the window means the server ignored the terms;
+        both are errors."""
+        data = self._graphql(_POSTS_QUERY_TEMPLATE % {
+            "after": after.isoformat(),
+            "before": before.isoformat(),
+            "limit": WINDOW_CAP,
+        })
+        results = data["posts"]["results"]
         if len(results) >= WINDOW_CAP:
             raise RuntimeError(
                 f"window {after}..{before} returned {len(results)} posts: "
@@ -297,6 +305,63 @@ class ForumMagnumAdapter:
             comment=", ".join(numbers) if numbers else None,
             doc=doc,
         )
+
+    def filename(self, paper: Paper) -> str:
+        """HTML filename: '<Author+Year Title> [<source>_<id>].html'."""
+        local_id = ids.local(paper.id)
+        return util.to_filename(
+            paper.name, f"{self.source}_{local_id}", ".html",
+        )
+
+    def grab(self, paper: Paper, path: str) -> str:
+        """Fetch the post's full text now — the body is never mirrored, so
+        grabbing queries it at this moment, like fetching an arXiv PDF —
+        and file it as a self-contained HTML page."""
+        local_id = ids.local(paper.id)
+        data = self._graphql(_GRAB_QUERY_TEMPLATE % {
+            "id": json.dumps(local_id),
+        })
+        result = data["post"]["result"]
+        if result is None:
+            raise RuntimeError(f"post {local_id} no longer exists upstream")
+        page = _grabbed_page(
+            title=result.get("title") or paper.title,
+            url=paper.entry_id,
+            html_body=result.get("htmlBody") or "",
+        )
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(page)
+        return f"downloaded ★ ({os.path.getsize(path) / 1024:.0f} KiB)"
+
+
+_GRAB_QUERY_TEMPLATE = """
+{
+  post(input: {selector: {_id: %(id)s}}) {
+    result {
+      title
+      htmlBody
+    }
+  }
+}
+"""
+
+
+def _grabbed_page(title: str, url: str, html_body: str) -> str:
+    """Wrap a post's htmlBody fragment as a minimal self-contained HTML
+    page: charset, title, and a link back to the post above the body."""
+    return (
+        "<!doctype html>\n"
+        "<html>\n"
+        '<head><meta charset="utf-8"><title>'
+        + html.escape(title)
+        + "</title></head>\n"
+        "<body>\n"
+        f'<p><a href="{html.escape(url, quote=True)}">{html.escape(url)}</a></p>\n'
+        f"<h1>{html.escape(title)}</h1>\n"
+        f"{html_body}\n"
+        "</body>\n"
+        "</html>\n"
+    )
 
 
 def _collapse(text: str) -> str:

@@ -30,6 +30,12 @@ work against:
 * `datestamp(doc)` — when the upstream feed last touched the document
   (the axis the harvest watermark advances along).
 * `to_paper(doc)` — the document→display mapping the scanner renders.
+* `filename(paper)` — the filename (with extension) a grabbed copy of
+  the paper files under.
+* `grab(paper, path)` — fetch the paper's full content (PDF, post body)
+  from upstream and write it to `path`; returns the status message the
+  scanner shows. Raises on failure without creating `path`'s file, or
+  leaves any partial file to its own cleanup.
 """
 
 import dataclasses

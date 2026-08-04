@@ -1,12 +1,17 @@
 """
 The arXiv source adapter (see firehose.sources for the interface it
 implements): fetching via arXiv's OAI-PMH feed in the arXivRaw metadata
-format, a mirror sharded by submission month, and the arXiv
-document→display mapping.
+format, a mirror sharded by submission month, the arXiv
+document→display mapping, and PDF grabbing.
 """
 
 import datetime
+import os
+import tempfile
 import time
+
+import requests
+import tqdm
 
 from firehose import ids
 from firehose import index
@@ -22,6 +27,11 @@ OAI_API_URL = "https://oaipmh.arxiv.org/oai"
 # Politeness: at most one record batch is pulled per 1/MAX_RPS seconds.
 MAX_RPS = 1/3
 BATCH_SIZE = 3_500
+
+# Connect and per-chunk read timeouts for PDF downloads, in seconds. The read
+# timeout is not a cap on the whole download; it bounds how long the server may
+# stop sending bytes before Requests raises.
+DOWNLOAD_TIMEOUT = (10, 60)
 
 # The OAI client library is imported on first use rather than here: this
 # module is imported by the CLI on every command, and only harvesting
@@ -135,6 +145,79 @@ class ArxivAdapter:
         return Paper.from_mirror_doc(
             doc, paper_id=ids.join(self.source, doc["id"]),
         )
+
+    def filename(self, paper: Paper) -> str:
+        """PDF filename: '<Surname+Year Title> [<id+version>].pdf'."""
+        return util.to_filename(paper.name, paper.xidv, ".pdf")
+
+    def grab(self, paper: Paper, path: str) -> str:
+        """Download the paper's PDF from arXiv to `path`; returns the
+        completed progress meter for the scanner to keep on screen."""
+        return download_pdf(xid=paper.xid, path=path)
+
+
+def download_pdf(xid: str, path: str) -> str:
+    """Download an arXiv PDF atomically to `path`.
+
+    HTTP errors and stalled transfers raise without creating or replacing the
+    destination. The response is streamed to a temporary file in the same
+    directory, then moved into place only after the complete body is received.
+    Returns the completed progress meter for the scanner to keep on screen.
+    """
+    url = f"https://arxiv.org/pdf/{xid}.pdf"
+    temp_path = None
+    try:
+        with requests.get(
+            url,
+            stream=True,
+            timeout=DOWNLOAD_TIMEOUT,
+        ) as response:
+            response.raise_for_status()
+            try:
+                content_length = response.headers.get("content-length")
+                total = int(content_length) if content_length is not None else None
+            except (TypeError, ValueError):
+                total = None
+
+            parent = os.path.dirname(os.path.abspath(path))
+            with tempfile.NamedTemporaryFile(
+                mode="wb",
+                dir=parent,
+                prefix=".firehose-",
+                suffix=".part",
+                delete=False,
+            ) as file:
+                temp_path = file.name
+                with tqdm.tqdm(
+                    desc="downloading...",
+                    total=total,
+                    unit="iB",
+                    unit_scale=True,
+                    unit_divisor=1024,
+                    ncols=80,
+                ) as bar:
+                    for data in response.iter_content(chunk_size=64 * 1024):
+                        if data:
+                            bar.update(file.write(data))
+
+            # A response without Content-Length has no percentage while it is
+            # in flight. Once EOF is reached, the received byte count is the
+            # known total, so its persistent final meter can still show 100%.
+            if bar.total is None:
+                bar.total = bar.n
+            bar.desc = "downloaded ★"
+            completed_progress = str(bar)
+
+        assert temp_path is not None
+        os.replace(temp_path, path)
+        temp_path = None
+        return completed_progress
+    finally:
+        if temp_path is not None:
+            try:
+                os.remove(temp_path)
+            except FileNotFoundError:
+                pass
 
 
 ADAPTER = ArxivAdapter()

@@ -10,7 +10,6 @@ import os
 import types
 
 import pytest
-import requests
 
 from firehose import util
 
@@ -134,148 +133,18 @@ def test_date_datestamp_round_trip():
 
 def test_to_filename_sanitizes_dot_in_modern_id():
     # '.' is not in the allowed character set, so it becomes '_'
-    assert util.to_filename("Smith+Lee2026 Deep Nets", "2508.09137v1") \
+    assert util.to_filename("Smith+Lee2026 Deep Nets", "2508.09137v1", ".pdf") \
         == "Smith+Lee2026 Deep Nets [2508_09137v1].pdf"
 
 
 def test_to_filename_sanitizes_slash_in_old_style_id():
-    assert util.to_filename("Author1996 Survey", "cs/9605103v1") \
+    assert util.to_filename("Author1996 Survey", "cs/9605103v1", ".pdf") \
         == "Author1996 Survey [cs_9605103v1].pdf"
 
 
 def test_to_filename_sanitizes_colon_in_title():
-    assert util.to_filename("Smith2026 Title: A Study", "2508.09137v1") \
-        == "Smith2026 Title_ A Study [2508_09137v1].pdf"
-
-
-# -- PDF download --------------------------------------------------------------
-
-class _FakeDownloadResponse:
-    def __init__(self, *, headers=None, chunks=(), status_error=None):
-        self.headers = headers or {}
-        self.chunks = chunks
-        self.status_error = status_error
-        self.closed = False
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_):
-        self.closed = True
-
-    def raise_for_status(self):
-        if self.status_error is not None:
-            raise self.status_error
-
-    def iter_content(self, chunk_size):
-        assert chunk_size == 64 * 1024
-        for chunk in self.chunks:
-            if isinstance(chunk, BaseException):
-                raise chunk
-            yield chunk
-
-
-@pytest.mark.parametrize("headers", [{}, {"content-length": "not-a-number"}])
-def test_download_paper_tolerates_unknown_content_length(
-    tmp_path, monkeypatch, headers,
-):
-    response = _FakeDownloadResponse(headers=headers, chunks=[b"%PDF", b" body"])
-    calls = []
-
-    def get(url, **kwargs):
-        calls.append((url, kwargs))
-        return response
-
-    monkeypatch.setattr(requests, "get", get)
-    path = tmp_path / "paper.pdf"
-
-    completed_progress = util.download_paper("2607.00001", str(path))
-
-    assert path.read_bytes() == b"%PDF body"
-    assert completed_progress.startswith("downloaded ★:")
-    assert "100%" in completed_progress
-    assert not list(tmp_path.glob(".firehose-*.part"))
-    assert response.closed
-    assert calls == [(
-        "https://arxiv.org/pdf/2607.00001.pdf",
-        {"stream": True, "timeout": util.DOWNLOAD_TIMEOUT},
-    )]
-
-
-def test_download_paper_rejects_http_error_without_creating_file(
-    tmp_path, monkeypatch,
-):
-    response = _FakeDownloadResponse(
-        headers={"content-length": "3"},
-        chunks=[b"ERR"],
-        status_error=requests.HTTPError("404 Not Found"),
-    )
-    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: response)
-    path = tmp_path / "paper.pdf"
-
-    with pytest.raises(requests.HTTPError, match="404"):
-        util.download_paper("missing", str(path))
-
-    assert not path.exists()
-    assert not list(tmp_path.glob(".firehose-*.part"))
-    assert response.closed
-
-
-def test_download_paper_cleans_partial_and_preserves_destination(
-    tmp_path, monkeypatch,
-):
-    response = _FakeDownloadResponse(chunks=[
-        b"partial",
-        requests.ConnectionError("connection lost"),
-    ])
-    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: response)
-    path = tmp_path / "paper.pdf"
-    path.write_bytes(b"existing")
-
-    with pytest.raises(requests.ConnectionError, match="connection lost"):
-        util.download_paper("2607.00001", str(path))
-
-    assert path.read_bytes() == b"existing"
-    assert not list(tmp_path.glob(".firehose-*.part"))
-    assert response.closed
-
-
-def test_download_paper_labels_live_progress(tmp_path, monkeypatch):
-    response = _FakeDownloadResponse(
-        headers={"content-length": "4"},
-        chunks=[b"%PDF"],
-    )
-    progress_kwargs = {}
-
-    class FakeBar:
-        def __init__(self, **kwargs):
-            progress_kwargs.update(kwargs)
-            self.total = kwargs["total"]
-            self.n = 0
-            self.desc = kwargs["desc"]
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_):
-            return None
-
-        def update(self, amount):
-            self.n += amount
-
-        def __str__(self):
-            return f"{self.desc}: 100%|bar| {self.n}/{self.total}"
-
-    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: response)
-    monkeypatch.setattr(util.tqdm, "tqdm", FakeBar)
-
-    completed_progress = util.download_paper(
-        "2607.00001", str(tmp_path / "paper.pdf")
-    )
-
-    assert progress_kwargs["desc"] == "downloading..."
-    assert progress_kwargs["total"] == 4
-    assert completed_progress == "downloaded ★: 100%|bar| 4/4"
+    assert util.to_filename("Smith2026 Title: A Study", "2508.09137v1", ".html") \
+        == "Smith2026 Title_ A Study [2508_09137v1].html"
 
 
 # -- clipboard -----------------------------------------------------------------

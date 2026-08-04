@@ -1,5 +1,5 @@
 """
-The `firehose sample` command: select a batch of unseen arXiv papers from the
+The `firehose sample` command: select a batch of unseen papers from the
 store and present their abstracts to scan, recording views / saves /
 downloads.
 
@@ -23,6 +23,8 @@ from dataclasses import dataclass
 import matthewplotlib as mp
 import readchar
 
+from firehose import ids
+from firehose import sources
 from firehose import util
 from firehose import vis
 from firehose.store import make_store
@@ -169,11 +171,6 @@ class Scanner:
         return self.current.id
 
     @property
-    def xid(self):
-        """The current paper's bare arXiv id (what downloads fetch)."""
-        return self.current.xid
-
-    @property
     def state(self):
         return self.states[self.index]
 
@@ -270,7 +267,7 @@ class Scanner:
         return [
             # Commit the external effect before recording/copying success. If
             # the download raises, the remaining effects are never run.
-            Download(self.xid, self.current.xidv, self.current.name),
+            Download(self.current),
             Log({"type": "download", "id": self.id}),
             Clip(f"- {self.current.name}\n"),
         ]
@@ -290,7 +287,7 @@ class Scanner:
         self.message = "removed"
         effects = [Log({"type": "remove", "id": self.id})]
         if was == "downloaded":
-            effects.append(DeletePDF(self.xid))
+            effects.append(DeleteDownload(self.id))
         return effects
 
     def _already(self):
@@ -307,6 +304,17 @@ class Scanner:
 
 
 GLYPHS = {"none": " ", "saved": "☆", "downloaded": "★"}
+
+
+def _datestamp(instant) -> str:
+    """The date of a paper's published/updated instant, for the header
+    line (scanning doesn't need the time of day); "?" when the feed
+    carried no date."""
+    if instant is None:
+        return "?"
+    if isinstance(instant, datetime.datetime):
+        return instant.date().isoformat()
+    return str(instant)
 
 
 TRUNCATED_NOTICE = "\033[2m[Truncated... press 'e' to expand]\033[0m"
@@ -352,7 +360,7 @@ def render_frame(scanner, elapsed: float, *, rows: int | None = None):
         f"{datetime.timedelta(seconds=int(elapsed))} ({average:.2f} seconds/paper)"
         + (" — PAUSED (space to resume)" if scanner.paused else ""),
         cats_line,
-        f"published: {p.published} updated: {p.updated}",
+        f"published: {_datestamp(p.published)} updated: {_datestamp(p.updated)}",
         "\033[1m" + textwrap.fill(p.title, width=80) + "\033[0m",
         "\033[2m" + textwrap.fill(authors, width=80) + "\033[0m",
     ]
@@ -422,29 +430,34 @@ class Stopwatch:
 
 class Downloads:
     """
-    Tracks the PDFs grabbed during a scan session so a later undo can remove
-    them. Files land in <download_dir>/<YYYY-MM>/ with names from
-    util.to_filename, de-duplicated with a "(duplicate)" suffix.
+    Tracks the files grabbed during a scan session so a later undo can
+    remove them, keyed by namespaced paper id. Each paper's source adapter
+    names its file and fetches its content; this manager owns the
+    filesystem policy — files land in <download_dir>/<YYYY-MM>/,
+    de-duplicated with a "(duplicate)" suffix.
     """
 
     def __init__(self, download_dir):
         self.download_dir = os.path.expanduser(download_dir)
         self._paths = {}
 
-    def download(self, xid, name, xidv):
-        dirpath = os.path.join(self.download_dir, datetime.date.today().strftime("%Y-%m"))
-        filename = util.to_filename(name, xidv)
-        path = os.path.join(dirpath, filename)
+    def download(self, paper):
+        adapter = sources.adapter(ids.source(paper.id))
+        dirpath = os.path.join(
+            self.download_dir, datetime.date.today().strftime("%Y-%m"),
+        )
+        stem, extension = os.path.splitext(adapter.filename(paper))
+        path = os.path.join(dirpath, stem + extension)
         os.makedirs(dirpath, exist_ok=True)
         while os.path.exists(path):
-            filename = f"{filename[:-4]} (duplicate).pdf"
-            path = os.path.join(dirpath, filename)
-        completed_progress = util.download_paper(paper_id=xid, path=path)
-        self._paths[xid] = path
-        return completed_progress
+            stem = f"{stem} (duplicate)"
+            path = os.path.join(dirpath, stem + extension)
+        message = adapter.grab(paper, path)
+        self._paths[paper.id] = path
+        return message
 
-    def delete(self, xid):
-        path = self._paths.pop(xid, None)
+    def delete(self, paper_id):
+        path = self._paths.pop(paper_id, None)
         if path and os.path.exists(path):
             os.remove(path)
 
@@ -487,22 +500,20 @@ class Open:
 
 @dataclass
 class Download:
-    """Download this paper's PDF."""
-    xid: str
-    xidv: str
-    name: str
+    """Grab this paper's full content through its source's adapter."""
+    paper: object
 
     def run(self, session):
-        return session.downloads.download(self.xid, self.name, self.xidv)
+        return session.downloads.download(self.paper)
 
 
 @dataclass
-class DeletePDF:
-    """Delete the PDF previously downloaded for this paper, if any."""
-    xid: str
+class DeleteDownload:
+    """Delete the file previously grabbed for this paper, if any."""
+    paper_id: str
 
     def run(self, session):
-        session.downloads.delete(self.xid)
+        session.downloads.delete(self.paper_id)
 
 
 @dataclass

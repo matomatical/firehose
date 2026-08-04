@@ -5,6 +5,7 @@ end-to-end against a store and the session managers (Downloads/Stopwatch) on
 plain files with mocked I/O. No terminal, network, or clipboard.
 """
 
+import datetime
 import json
 import re
 import textwrap
@@ -16,10 +17,11 @@ import readchar
 from firehose import util
 from firehose.paper import Paper
 from firehose.sample import (
-    Scanner, Log, Clip, Open, Download, DeletePDF,
+    Scanner, Log, Clip, Open, Download, DeleteDownload,
     PauseTimer, ResumeTimer, render_frame, KEY_TO_COMMAND, TRUNCATED_NOTICE,
     Session, Downloads, Stopwatch, run_effects,
 )
+from firehose.sources import arxiv as arxiv_module
 from firehose.store import LocalStore
 
 
@@ -45,8 +47,8 @@ def mkpaper(i: int) -> Paper:
         authors=["Ada Author", "Bo Boauthor"],
         categories=["cs.LG", "cs.AI"],
         summary="A summary.",
-        published="2026-01-01",
-        updated="2026-01-01",
+        published=datetime.datetime(2026, 1, 1, 10, 30),
+        updated=datetime.datetime(2026, 1, 1, 10, 30),
         comment=None,
     )
 
@@ -100,22 +102,22 @@ def test_save_then_remove_no_pdf():
     assert fx == [Log({"type": "save", "id": sc.id}), Clip(f"- ? {sc.current.name}\n")]
     fx = sc.feed("remove")
     assert sc.states[0] == "none"
-    assert fx == [Log({"type": "remove", "id": sc.id})]  # no DeletePDF: only saved
+    assert fx == [Log({"type": "remove", "id": sc.id})]  # only saved: no delete
 
 
-def test_download_then_remove_deletes_pdf():
+def test_download_then_remove_deletes_file():
     sc = Scanner(papers(1)); sc.start()
     fx = sc.feed("download")
     assert sc.states[0] == "downloaded"
     assert fx == [
-        Download(sc.xid, sc.current.xidv, sc.current.name),
+        Download(sc.current),
         Log({"type": "download", "id": sc.id}),
         Clip(f"- {sc.current.name}\n"),
     ]
     fx = sc.feed("remove")
     assert sc.states[0] == "none"
     assert Log({"type": "remove", "id": sc.id}) in fx
-    assert DeletePDF(sc.xid) in fx
+    assert DeleteDownload(sc.id) in fx
 
 
 def test_down_is_progressive():
@@ -332,12 +334,12 @@ def test_save_message_reports_clipboard_outcome(tmp_path, monkeypatch, copied, d
 def test_download_message_keeps_complete_progress_bar(tmp_path, monkeypatch):
     completed_progress = "downloaded ★: 100%|████| 4/4 bytes"
 
-    def download(paper_id, path):
+    def download(xid, path):
         open(path, "w").write("PDF")
         return completed_progress
 
     monkeypatch.setattr(
-        util, "download_paper", download,
+        arxiv_module, "download_pdf", download,
     )
     monkeypatch.setattr(util, "copy_to_clipboard", lambda text: False)
     sc = Scanner(papers(1)); sc.start()
@@ -386,11 +388,11 @@ def test_effects_run_end_to_end(tmp_path, monkeypatch):
     # KEY_TO_COMMAND tests.)
     monkeypatch.setattr(util, "copy_to_clipboard", lambda text: False)
     monkeypatch.setattr(util, "open_url", lambda url: False)
-    def download(paper_id, path):
+    def download(xid, path):
         open(path, "w").write("PDF")
         return "downloaded ★: 100%|████|"
 
-    monkeypatch.setattr(util, "download_paper", download)
+    monkeypatch.setattr(arxiv_module, "download_pdf", download)
 
     sc = Scanner(papers(1))
     session = mksession(tmp_path)
@@ -418,10 +420,10 @@ def test_failed_download_is_not_logged_or_copied(tmp_path, monkeypatch):
     events_path = tmp_path / "events.jsonl"
     copied = []
 
-    def fail_download(paper_id, path):
+    def fail_download(xid, path):
         raise RuntimeError("offline")
 
-    monkeypatch.setattr(util, "download_paper", fail_download)
+    monkeypatch.setattr(arxiv_module, "download_pdf", fail_download)
     monkeypatch.setattr(util, "copy_to_clipboard", lambda text: copied.append(text))
 
     sc = Scanner(papers(1))
@@ -441,24 +443,25 @@ def test_failed_download_is_not_logged_or_copied(tmp_path, monkeypatch):
 
 def _stub_downloader(monkeypatch):
     monkeypatch.setattr(
-        util, "download_paper", lambda paper_id, path: open(path, "w").write("PDF")
+        arxiv_module, "download_pdf",
+        lambda xid, path: open(path, "w").write("PDF"),
     )
 
 
 def test_downloads_dedups_on_filename_collision(tmp_path, monkeypatch):
     _stub_downloader(monkeypatch)
     dl = Downloads(str(tmp_path))
-    dl.download("2601.1", "Smith2026 A", "2601.1v1")
-    dl.download("2601.1", "Smith2026 A", "2601.1v1")   # identical -> "(duplicate)"
+    dl.download(mkpaper(1))
+    dl.download(mkpaper(1))   # identical -> "(duplicate)" before the extension
     pdfs = [p.name for p in tmp_path.rglob("*.pdf")]
-    assert len(pdfs) == 2 and any("(duplicate)" in n for n in pdfs)
+    assert len(pdfs) == 2 and any("(duplicate).pdf" in n for n in pdfs)
 
 
 def test_downloads_delete_removes_tracked_file(tmp_path, monkeypatch):
     _stub_downloader(monkeypatch)
     dl = Downloads(str(tmp_path))
-    dl.download("2601.1", "Smith2026 A", "2601.1v1")
+    dl.download(mkpaper(1))
     assert list(tmp_path.rglob("*.pdf"))               # downloaded
-    dl.delete("2601.1")
+    dl.delete(mkpaper(1).id)
     assert list(tmp_path.rglob("*.pdf")) == []         # removed
-    dl.delete("2601.1")                                # unknown id -> no error
+    dl.delete(mkpaper(1).id)                           # unknown id -> no error

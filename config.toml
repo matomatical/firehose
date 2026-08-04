@@ -26,11 +26,11 @@ url = "http://100.82.212.8:8377"
 listen_host = "100.82.212.8"
 listen_port = 8377
 
-# Each [sources.<name>] section configures one feed source. arXiv is the
-# only source so far. A section may set `modern_cutoff` (a bare date --
-# TOML parses it as a date): that source's papers dated on or before it
-# are treated as backlog and dropped by the default `sample` scan
-# (`sample --no-modern` keeps them).
+# Each [sources.<name>] section configures one feed source; a source is
+# harvested and scanned iff its section exists. A section may set
+# `modern_cutoff` (a bare date -- TOML parses it as a date): that source's
+# papers dated on or before it are treated as backlog and dropped by the
+# default `sample` scan (`sample --no-modern` keeps them).
 
 [sources.arxiv]
 # Roughly when I started using firehose.
@@ -209,3 +209,13 @@ categories = [
   # "q-fin:q-fin:ST",              # Statistical Finance
   # "q-fin:q-fin:TR",              # Trading and Market Microstructure
 ]
+
+[sources.lw]
+# LessWrong (all posts, back to the 2003-backdated imports). The cutoff is
+# a pacing device, not a fence: the plan is to read the full backlog over
+# time, paging deeper with --no-modern and lowering the cutoff as it goes.
+modern_cutoff = 2026-07-31
+
+[sources.eaf]
+# EA Forum (all posts). Same pacing-device cutoff as LessWrong.
+modern_cutoff = 2026-07-31
