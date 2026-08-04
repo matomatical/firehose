@@ -184,7 +184,7 @@ def summarise_scan_time(events: list[dict]) -> ScanTimeSummary:
         total_sessions += 1
         day = datetime.datetime.fromisoformat(session[0]["t"]).date()
         papers = len({
-            e["xid"] for e in session if e.get("type") == "view"
+            e["id"] for e in session if e.get("type") == "view"
         })
         seconds = session_active_seconds(session)
         stats = by_day.get(day)

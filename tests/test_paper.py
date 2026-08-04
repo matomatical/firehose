@@ -16,8 +16,9 @@ def test_from_mirror_doc_maps_fields():
         categories=("cs.LG", "cs.AI"),
         comments="10 pages, 3 figures",
     )
-    p = Paper.from_mirror_doc(doc)
+    p = Paper.from_mirror_doc(doc, paper_id="arxiv:2601.00001")
 
+    assert p.id == "arxiv:2601.00001"
     assert p.xid == "2601.00001"
     assert p.xidv == "2601.00001v1"
     assert p.entry_id == "http://arxiv.org/abs/2601.00001v1"
@@ -37,7 +38,7 @@ def test_from_mirror_doc_versions():
         {"version": "v3", "date": "2026-02-10T12:00:00+00:00",
          "size": None, "source_type": None},
     ])
-    p = Paper.from_mirror_doc(doc)
+    p = Paper.from_mirror_doc(doc, paper_id="arxiv:2601.00001")
 
     assert p.xidv == "2601.00001v3"          # latest version
     assert p.published.date() == datetime.date(2026, 1, 2)
@@ -48,7 +49,7 @@ def test_from_mirror_doc_tolerates_missing_version_date():
     doc = make_doc("2601.00001", versions=[
         {"version": "v1", "date": None, "size": None, "source_type": None},
     ])
-    p = Paper.from_mirror_doc(doc)
+    p = Paper.from_mirror_doc(doc, paper_id="arxiv:2601.00001")
 
     assert p.published is None
     assert p.name.startswith("Author+Boauthor???? ")

@@ -71,10 +71,10 @@ def test_get_paper_round_trip(tmp_path):
     ])
     remote = make_remote(tmp_path)
 
-    assert remote.get_paper("2601.00001").title == "Title 2601.00001"
+    assert remote.get_paper("arxiv:2601.00001").title == "Title 2601.00001"
     # old-style ids carry a slash through the URL path
-    assert remote.get_paper("math/0211159").xid == "math/0211159"
-    assert remote.get_paper("2601.99999") is None
+    assert remote.get_paper("arxiv:math/0211159").xid == "math/0211159"
+    assert remote.get_paper("arxiv:2601.99999") is None
 
 
 def test_record_events_round_trip(tmp_path):
@@ -82,12 +82,12 @@ def test_record_events_round_trip(tmp_path):
     remote = make_remote(tmp_path)
 
     remote.record_events([{"type": "start", "n": 1}])
-    remote.record_events([{"type": "view", "xid": "2601.00001"}])
+    remote.record_events([{"type": "view", "id": "arxiv:2601.00001"}])
     remote.close()   # recording is asynchronous; close settles delivery
 
     # the view lands in the server's seen-set and on its disk, stamped
     # with the client's timestamp
-    assert remote.read_ids() == {"2601.00001"}
+    assert remote.read_ids() == {"arxiv:2601.00001"}
     assert [p.xid for p in remote.select_papers(10)] == ["2601.00002"]
     events = [
         json.loads(line)
@@ -105,7 +105,7 @@ def test_reading_state_queries_round_trip(tmp_path):
             make_doc("2601.00002", date="2026-01-02"),
         ],
         events=[
-            {"t": "2026-01-03", "type": "read-import", "xid": "2601.00001"},
+            {"t": "2026-01-03", "type": "read-import", "id": "arxiv:2601.00001"},
         ],
     )
     remote = make_remote(tmp_path)
@@ -117,9 +117,9 @@ def test_reading_state_queries_round_trip(tmp_path):
     assert remote.unread_dates(cutoff=datetime.date(2026, 1, 2)) == []
     assert remote.read_dates() == [datetime.date(2026, 1, 3)]
     assert remote.read_submit_dates() == [datetime.date(2026, 1, 1)]
-    assert remote.subscribed_ids() == ["2601.00001", "2601.00002"]
+    assert remote.subscribed_ids() == ["arxiv:2601.00001", "arxiv:2601.00002"]
     assert remote.scan_events() == [
-        {"t": "2026-01-03", "type": "read-import", "xid": "2601.00001"},
+        {"t": "2026-01-03", "type": "read-import", "id": "arxiv:2601.00001"},
     ]
     remote.refresh_events()   # a no-op, but part of the interface
 
@@ -129,8 +129,8 @@ def test_event_order_survives_asynchronous_delivery(tmp_path):
     remote = make_remote(tmp_path)
 
     remote.record_events([{"type": "start", "n": 2}])
-    remote.record_events([{"type": "view", "xid": "2601.00001"}])
-    remote.record_events([{"type": "view", "xid": "2601.00002"}])
+    remote.record_events([{"type": "view", "id": "arxiv:2601.00001"}])
+    remote.record_events([{"type": "view", "id": "arxiv:2601.00002"}])
     remote.record_events([{"type": "end"}])
     remote.close()
 
@@ -138,8 +138,8 @@ def test_event_order_survives_asynchronous_delivery(tmp_path):
         json.loads(line)
         for line in (tmp_path / "events.jsonl").read_text().splitlines()
     ]
-    assert [e.get("xid", e["type"]) for e in events] == [
-        "start", "2601.00001", "2601.00002", "end",
+    assert [e.get("id", e["type"]) for e in events] == [
+        "start", "arxiv:2601.00001", "arxiv:2601.00002", "end",
     ]
 
 
@@ -166,7 +166,7 @@ def test_event_posting_retries_transient_failures(tmp_path, capsys):
         return httpx.Response(200, json={"recorded": 1})
 
     remote = _failing_remote(tmp_path, handler, retry_waits=(0.0, 0.0))
-    remote.record_events([{"type": "view", "xid": "2601.00001"}])
+    remote.record_events([{"type": "view", "id": "arxiv:2601.00001"}])
     remote.close()
 
     assert len(posts) == 2   # first attempt failed, retry delivered
@@ -180,7 +180,7 @@ def test_undeliverable_events_spool_with_a_notice(tmp_path, capsys):
 
     remote = _failing_remote(tmp_path, handler, retry_waits=(0.0,))
     remote.record_events([{"type": "start", "n": 1}])
-    remote.record_events([{"type": "view", "xid": "2601.00001"}])
+    remote.record_events([{"type": "view", "id": "arxiv:2601.00001"}])
     remote.close()
 
     spool_path = tmp_path / "unsent-events.jsonl"
@@ -199,7 +199,7 @@ def test_status_round_trip(tmp_path):
         tmp_path,
         [make_doc("2601.00001", date="2026-01-01")],
         events=[
-            {"t": "2026-01-03T10:00:00", "type": "view", "xid": "2601.00001"},
+            {"t": "2026-01-03T10:00:00", "type": "view", "id": "arxiv:2601.00001"},
         ],
     )
     remote = make_remote(tmp_path)

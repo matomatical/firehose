@@ -311,12 +311,12 @@ def test_copy_to_clipboard_checks_process_exit_status(
 
 def test_log_event_appends_json_lines_with_timestamp(tmp_path):
     path = str(tmp_path / "events.jsonl")
-    util.log_event(path, {"type": "view", "xid": "2508.00001"})
-    util.log_event(path, {"type": "save", "xid": "2508.00001"})
+    util.log_event(path, {"type": "view", "id": "arxiv:2508.00001"})
+    util.log_event(path, {"type": "save", "id": "arxiv:2508.00001"})
 
     records = [json.loads(line) for line in open(path)]
     assert len(records) == 2
-    assert records[0]["type"] == "view" and records[0]["xid"] == "2508.00001"
+    assert records[0]["type"] == "view" and records[0]["id"] == "arxiv:2508.00001"
     assert records[1]["type"] == "save"
     # every record is timestamped with an ISO-8601 "t" the analytics side parses back
     for r in records:
@@ -337,18 +337,18 @@ def test_load_events_round_trips_log_event(tmp_path):
     # (with the stamped "t") in chronological order.
     path = str(tmp_path / "events.jsonl")
     util.log_event(path, {"type": "start", "n": 2})
-    util.log_event(path, {"type": "view", "xid": "2508.00001"})
+    util.log_event(path, {"type": "view", "id": "arxiv:2508.00001"})
     util.log_event(path, {"type": "end"})
 
     events = util.load_events(path)
     assert [e["type"] for e in events] == ["start", "view", "end"]
-    assert events[0]["n"] == 2 and events[1]["xid"] == "2508.00001"
+    assert events[0]["n"] == 2 and events[1]["id"] == "arxiv:2508.00001"
     assert all("t" in e for e in events)
 
 
 def test_load_events_skips_blank_lines(tmp_path):
     path = tmp_path / "events.jsonl"
-    path.write_text('{"t": "2026-06-22T11:00:00", "type": "view", "xid": "a"}\n\n')
+    path.write_text('{"t": "2026-06-22T11:00:00", "type": "view", "id": "arxiv:a"}\n\n')
     assert len(util.load_events(str(path))) == 1
 
 

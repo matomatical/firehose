@@ -450,8 +450,8 @@ def render_status(status: dict) -> str:
     last = status.get("last_event")
     if last is not None:
         label = last.get("type", "?")
-        if "xid" in last:
-            label += f" {last['xid']}"
+        if "id" in last:
+            label += f" {last['id']}"
         line += f", last {label} at {last['t'][:19]}"
     lines.append(line)
     if harvests:

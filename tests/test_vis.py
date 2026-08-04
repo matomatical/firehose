@@ -44,7 +44,7 @@ def test_all_submitted_years_runs_against_tmp_store(tmp_path, capsys):
 def test_render_scan_time_has_totals_row():
     events = [
         {"t": "2026-06-22T11:00:00", "type": "start", "n": 1},
-        {"t": "2026-06-22T11:00:04", "type": "view", "xid": "a"},
+        {"t": "2026-06-22T11:00:04", "type": "view", "id": "arxiv:a"},
         {"t": "2026-06-22T11:00:10", "type": "end"},
     ]
     out = vis.render_scan_time(stats.summarise_scan_time(events))
@@ -67,7 +67,7 @@ def test_scan_time_entry_point_runs_against_tmp_events(tmp_path, capsys):
     with open(tmp_path / "events.jsonl", "w") as f:
         for event in [
             {"t": "2026-06-22T11:00:00", "type": "start", "n": 1},
-            {"t": "2026-06-22T11:00:04", "type": "view", "xid": "a"},
+            {"t": "2026-06-22T11:00:04", "type": "view", "id": "arxiv:a"},
             {"t": "2026-06-22T11:00:10", "type": "end"},
         ]:
             f.write(json.dumps(event) + "\n")
@@ -96,9 +96,9 @@ def test_scan_time_notes_untimed_imported_reads(tmp_path, capsys):
     config_path = _config(tmp_path)
     with open(tmp_path / "events.jsonl", "w") as f:
         for event in [
-            {"t": "2025-04-23", "type": "read-import", "xid": "old"},
+            {"t": "2025-04-23", "type": "read-import", "id": "arxiv:old"},
             {"t": "2026-06-22T11:00:00", "type": "start", "n": 1},
-            {"t": "2026-06-22T11:00:04", "type": "view", "xid": "a"},
+            {"t": "2026-06-22T11:00:04", "type": "view", "id": "arxiv:a"},
             {"t": "2026-06-22T11:00:10", "type": "end"},
         ]:
             f.write(json.dumps(event) + "\n")
@@ -123,7 +123,7 @@ def test_render_status_remote_snapshot():
         "last_event": {
             "t": "2026-08-04T09:12:33.500000",
             "type": "view",
-            "xid": "2508.01234",
+            "id": "arxiv:2508.01234",
         },
         "harvests": [
             {
@@ -145,7 +145,7 @@ def test_render_status_remote_snapshot():
     assert "server: http://nook:8377 (running since 2026-08-04T04:07:12)" in out
     assert "mirror: watermark 2026-08-04, 3,130,412 papers" in out
     assert "subscribed: 910,000 papers, 133,200 seen" in out
-    assert "events: 133,842, last view 2508.01234 at 2026-08-04T09:12:33" in out
+    assert "events: 133,842, last view arxiv:2508.01234 at 2026-08-04T09:12:33" in out
     assert (
         "* 2026-08-04T04:00:01 .. 2026-08-04T04:07:12:"
         " new: 1204, updated: 33"
@@ -194,7 +194,7 @@ def test_unread_entry_point_runs_against_tmp_data(tmp_path, capsys):
             make_doc("2601.00003", date="2026-01-02"),
         ],
         events=[
-            {"t": "2026-01-03T10:00:00", "type": "view", "xid": "2601.00003"},
+            {"t": "2026-01-03T10:00:00", "type": "view", "id": "arxiv:2601.00003"},
         ],
     )
 

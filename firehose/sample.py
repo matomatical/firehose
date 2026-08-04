@@ -160,7 +160,13 @@ class Scanner:
         return self.papers[self.index]
 
     @property
+    def id(self):
+        """The current paper's namespaced id (what events record)."""
+        return self.current.id
+
+    @property
     def xid(self):
+        """The current paper's bare arXiv id (what downloads fetch)."""
         return self.current.xid
 
     @property
@@ -172,7 +178,7 @@ class Scanner:
         self.expanded = False   # each new paper starts collapsed
         if self.index > self.nseen:
             self.nseen = self.index
-        return [Log({"type": "view", "xid": self.xid})]
+        return [Log({"type": "view", "id": self.id})]
 
     def start(self):
         """Begin a session: a start event plus the first paper's arrival."""
@@ -250,7 +256,7 @@ class Scanner:
         self.states[self.index] = "saved"
         self.message = "saved ☆"
         return [
-            Log({"type": "save", "xid": self.xid}),
+            Log({"type": "save", "id": self.id}),
             Clip(f"- ? {self.current.name}\n"),
         ]
 
@@ -261,7 +267,7 @@ class Scanner:
             # Commit the external effect before recording/copying success. If
             # the download raises, the remaining effects are never run.
             Download(self.xid, self.current.xidv, self.current.name),
-            Log({"type": "download", "xid": self.xid}),
+            Log({"type": "download", "id": self.id}),
             Clip(f"- {self.current.name}\n"),
         ]
 
@@ -278,7 +284,7 @@ class Scanner:
         was = self.states[self.index]
         self.states[self.index] = "none"
         self.message = "removed"
-        effects = [Log({"type": "remove", "xid": self.xid})]
+        effects = [Log({"type": "remove", "id": self.id})]
         if was == "downloaded":
             effects.append(DeletePDF(self.xid))
         return effects

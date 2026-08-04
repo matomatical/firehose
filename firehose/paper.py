@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 
 @dataclass
 class Paper:
+    id: str           # namespaced id, e.g. "arxiv:2601.00001"
     xidv: str         # arxiv id with version, e.g. "2601.00001v1"
     name: str         # "Author+Year Title", for PDF filenames
     entry_id: str     # abstract page URL, e.g. "http://arxiv.org/abs/..."
@@ -34,12 +35,13 @@ class Paper:
         return self.xidv.split('v')[0]
 
     @classmethod
-    def from_mirror_doc(cls, doc: dict) -> "Paper":
+    def from_mirror_doc(cls, doc: dict, paper_id: str) -> "Paper":
         """
-        Build a Paper from a mirror document (see arxivraw): versions carry
-        the published (v1) and updated (latest) instants, `authors` is one
-        display string split heuristically into individual names, and
-        `abstract`/`comments` map to `summary`/`comment`.
+        Build a Paper from a mirror document (see arxivraw) and its
+        namespaced id (the document's own id is source-local): versions
+        carry the published (v1) and updated (latest) instants, `authors`
+        is one display string split heuristically into individual names,
+        and `abstract`/`comments` map to `summary`/`comment`.
         """
         versions = doc["versions"]
         version = versions[-1].get("version") or "v1"
@@ -48,6 +50,7 @@ class Paper:
         updated = _version_datetime(versions[-1])
         authors = split_authors(doc.get("authors", ""))
         return cls(
+            id=paper_id,
             xidv=xidv,
             name=to_name(
                 authors=authors,

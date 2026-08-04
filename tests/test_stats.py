@@ -92,9 +92,9 @@ def _ev(t, type, **rest):
 
 def test_split_sessions_groups_by_start_end():
     events = [
-        _ev("11:00:00", "start", n=1), _ev("11:00:05", "view", xid="a"),
+        _ev("11:00:00", "start", n=1), _ev("11:00:05", "view", id="a"),
         _ev("11:00:10", "end"),
-        _ev("12:00:00", "start", n=1), _ev("12:00:03", "view", xid="b"),
+        _ev("12:00:00", "start", n=1), _ev("12:00:03", "view", id="b"),
         _ev("12:00:09", "end"),
     ]
     sessions = stats.split_sessions(events)
@@ -106,8 +106,8 @@ def test_split_sessions_handles_missing_end_then_new_start():
     # a crash (start with no end) still closes when the next start arrives, and
     # a trailing in-progress run (no end yet) is returned too.
     events = [
-        _ev("11:00:00", "start", n=1), _ev("11:00:05", "view", xid="a"),
-        _ev("12:00:00", "start", n=1), _ev("12:00:03", "view", xid="b"),
+        _ev("11:00:00", "start", n=1), _ev("11:00:05", "view", id="a"),
+        _ev("12:00:00", "start", n=1), _ev("12:00:03", "view", id="b"),
     ]
     sessions = stats.split_sessions(events)
     assert len(sessions) == 2
@@ -117,8 +117,8 @@ def test_split_sessions_handles_missing_end_then_new_start():
 def test_session_active_seconds_sums_gaps():
     # gaps: 5 (start->view) + 22 (view->view) + 5 (view->end) = 32
     session = [
-        _ev("11:00:00", "start", n=2), _ev("11:00:05", "view", xid="a"),
-        _ev("11:00:27", "view", xid="b"), _ev("11:00:32", "end"),
+        _ev("11:00:00", "start", n=2), _ev("11:00:05", "view", id="a"),
+        _ev("11:00:27", "view", id="b"), _ev("11:00:32", "end"),
     ]
     assert stats.session_active_seconds(session) == 32.0
 
@@ -126,7 +126,7 @@ def test_session_active_seconds_sums_gaps():
 def test_session_active_seconds_excludes_paused_span():
     # the 100s pause->resume gap is dropped; the rest (5 + 5 + 3 = 13) counts.
     session = [
-        _ev("11:00:00", "start", n=1), _ev("11:00:05", "view", xid="a"),
+        _ev("11:00:00", "start", n=1), _ev("11:00:05", "view", id="a"),
         _ev("11:00:10", "pause"), _ev("11:01:50", "resume"),
         _ev("11:01:53", "end"),
     ]
@@ -136,8 +136,8 @@ def test_session_active_seconds_excludes_paused_span():
 def test_summarise_scan_time_distinct_papers_and_totals():
     # one session, a re-viewed paper ("a" twice via back/forward) counts once.
     events = [
-        _ev("11:00:00", "start", n=2), _ev("11:00:04", "view", xid="a"),
-        _ev("11:00:10", "view", xid="b"), _ev("11:00:14", "view", xid="a"),
+        _ev("11:00:00", "start", n=2), _ev("11:00:04", "view", id="a"),
+        _ev("11:00:10", "view", id="b"), _ev("11:00:14", "view", id="a"),
         _ev("11:00:20", "end"),
     ]
     summary = stats.summarise_scan_time(events)
@@ -152,10 +152,10 @@ def test_summarise_scan_time_distinct_papers_and_totals():
 def test_summarise_scan_time_buckets_by_session_start_day():
     events = [
         {"t": "2026-06-22T11:00:00", "type": "start", "n": 1},
-        {"t": "2026-06-22T11:00:06", "type": "view", "xid": "a"},
+        {"t": "2026-06-22T11:00:06", "type": "view", "id": "arxiv:a"},
         {"t": "2026-06-22T11:00:10", "type": "end"},
         {"t": "2026-06-23T09:00:00", "type": "start", "n": 1},
-        {"t": "2026-06-23T09:00:04", "type": "view", "xid": "b"},
+        {"t": "2026-06-23T09:00:04", "type": "view", "id": "arxiv:b"},
         {"t": "2026-06-23T09:00:10", "type": "end"},
     ]
     summary = stats.summarise_scan_time(events)
@@ -175,10 +175,10 @@ def test_summarise_scan_time_excludes_read_imports():
     # a block of imported reading history (day-resolution timestamps,
     # preceding any real session) contributes no sessions, papers, or time.
     events = [
-        {"t": "2025-04-23", "type": "read-import", "xid": "old-a"},
-        {"t": "2025-04-24", "type": "read-import", "xid": "old-b"},
+        {"t": "2025-04-23", "type": "read-import", "id": "arxiv:old-a"},
+        {"t": "2025-04-24", "type": "read-import", "id": "arxiv:old-b"},
         _ev("11:00:00", "start", n=1),
-        _ev("11:00:04", "view", xid="a"),
+        _ev("11:00:04", "view", id="a"),
         _ev("11:00:10", "end"),
     ]
     summary = stats.summarise_scan_time(events)

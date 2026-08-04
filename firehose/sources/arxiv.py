@@ -8,6 +8,7 @@ document→display mapping.
 import datetime
 import time
 
+from firehose import ids
 from firehose import index
 from firehose import util
 from firehose.paper import Paper
@@ -117,7 +118,9 @@ class ArxivAdapter:
         return datetime.date.fromisoformat(doc["oai_datestamp"])
 
     def to_paper(self, doc: dict) -> Paper:
-        return Paper.from_mirror_doc(doc)
+        return Paper.from_mirror_doc(
+            doc, paper_id=ids.join(self.source, doc["id"]),
+        )
 
 
 ADAPTER = ArxivAdapter()

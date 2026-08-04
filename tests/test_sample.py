@@ -26,11 +26,7 @@ from firehose.store import LocalStore
 def mksession(tmp_path) -> Session:
     """A Session over a real LocalStore writing into tmp_path (the store's
     index and mirror are never touched by the effect tests)."""
-    paths = types.SimpleNamespace(
-        events=str(tmp_path / "events.jsonl"),
-        index=str(tmp_path / "index.txt"),
-        mirror=str(tmp_path / "metadata"),
-    )
+    paths = util.DataPaths(data_dir=str(tmp_path))
     return Session(
         store=LocalStore(paths, subscribed=set()),
         downloads=Downloads(str(tmp_path / "dl")),
@@ -41,6 +37,7 @@ def mksession(tmp_path) -> Session:
 def mkpaper(i: int) -> Paper:
     xid = f"2601.{i:05d}"
     return Paper(
+        id=f"arxiv:{xid}",
         xidv=xid + "v1",
         name=f"Author{i}2026 Title {i}",
         entry_id=f"http://arxiv.org/abs/{xid}v1",
@@ -89,7 +86,7 @@ def test_start_emits_start_then_arrival():
     fx = sc.start()
     assert fx == [
         Log({"type": "start", "n": 2}),
-        Log({"type": "view", "xid": sc.xid}),
+        Log({"type": "view", "id": sc.id}),
     ]
     assert sc.nseen == 0
 
@@ -100,10 +97,10 @@ def test_save_then_remove_no_pdf():
     sc = Scanner(papers(1)); sc.start()
     fx = sc.feed("save")
     assert sc.states[0] == "saved"
-    assert fx == [Log({"type": "save", "xid": sc.xid}), Clip(f"- ? {sc.current.name}\n")]
+    assert fx == [Log({"type": "save", "id": sc.id}), Clip(f"- ? {sc.current.name}\n")]
     fx = sc.feed("remove")
     assert sc.states[0] == "none"
-    assert fx == [Log({"type": "remove", "xid": sc.xid})]  # no DeletePDF: only saved
+    assert fx == [Log({"type": "remove", "id": sc.id})]  # no DeletePDF: only saved
 
 
 def test_download_then_remove_deletes_pdf():
@@ -112,12 +109,12 @@ def test_download_then_remove_deletes_pdf():
     assert sc.states[0] == "downloaded"
     assert fx == [
         Download(sc.xid, sc.current.xidv, sc.current.name),
-        Log({"type": "download", "xid": sc.xid}),
+        Log({"type": "download", "id": sc.id}),
         Clip(f"- {sc.current.name}\n"),
     ]
     fx = sc.feed("remove")
     assert sc.states[0] == "none"
-    assert Log({"type": "remove", "xid": sc.xid}) in fx
+    assert Log({"type": "remove", "id": sc.id}) in fx
     assert DeletePDF(sc.xid) in fx
 
 
@@ -174,7 +171,7 @@ def test_forward_arrives_and_logs_new_paper():
     sc = Scanner(papers(2)); sc.start()
     fx = sc.feed("forward")
     assert sc.index == 1
-    assert Log({"type": "view", "xid": sc.xid}) in fx
+    assert Log({"type": "view", "id": sc.id}) in fx
     assert sc.nseen == 1
 
 
@@ -193,7 +190,7 @@ def test_revisit_logs_view_without_advancing_frontier():
     sc = Scanner(papers(2)); sc.start()    # arrive p0
     sc.feed("forward")                      # arrive p1
     fx = sc.feed("back")                    # back to p0: a view, nseen stays
-    assert fx == [Log({"type": "view", "xid": sc.xid})]
+    assert fx == [Log({"type": "view", "id": sc.id})]
     assert sc.nseen == 1
 
 
@@ -414,7 +411,7 @@ def test_effects_run_end_to_end(tmp_path, monkeypatch):
         "download", "remove", "end",
     ]
     assert list((tmp_path / "dl").rglob("*.pdf")) == []  # downloaded then deleted
-    assert session.store.read_ids() == {"2601.00001"}    # the view marked it seen
+    assert session.store.read_ids() == {"arxiv:2601.00001"}    # the view marked it seen
 
 
 def test_failed_download_is_not_logged_or_copied(tmp_path, monkeypatch):

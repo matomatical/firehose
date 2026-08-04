@@ -50,11 +50,11 @@ def create_app(store: LocalStore) -> FastAPI:
         )
         return [p.doc for p in selected]
 
-    @app.get("/papers/{xid:path}")
-    def paper(xid: str) -> dict:
-        found = store.get_paper(xid)
+    @app.get("/papers/{paper_id:path}")
+    def paper(paper_id: str) -> dict:
+        found = store.get_paper(paper_id)
         if found is None:
-            raise HTTPException(status_code=404, detail=f"no paper {xid}")
+            raise HTTPException(status_code=404, detail=f"no paper {paper_id}")
         return found.doc
 
     @app.post("/events")

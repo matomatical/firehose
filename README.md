@@ -363,8 +363,9 @@ and hand-editable:
   (submission-date) headers. Rebuildable at any time with
   `firehose rebuild-index`.
 * **`events.jsonl`**: an append-only event log, one JSON object per line
-  (`{"t": ..., "type": "view"|"save"|"download"|..., "xid": ...}`), recording
-  each scanning session. This is the canonical record of your reading.
+  (`{"t": ..., "type": "view"|"save"|"download"|..., "id": "arxiv:..."}`),
+  recording each scanning session. This is the canonical record of your
+  reading.
 * **`harvests.jsonl`**: an operational log of `mirror` runs, one line per run
   (when it ran, what it applied, the watermark it reached). This is what
   `status` reads back; unlike the event log it's disposable.

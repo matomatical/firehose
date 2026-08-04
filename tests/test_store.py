@@ -141,7 +141,7 @@ def test_select_papers_excludes_seen(tmp_path):
         tmp_path,
         [make_doc("2601.00001"), make_doc("2601.00002")],
         events=[
-            {"t": "2026-01-03T10:00:00", "type": "view", "xid": "2601.00001"},
+            {"t": "2026-01-03T10:00:00", "type": "view", "id": "arxiv:2601.00001"},
         ],
     )
     store = make_store(tmp_path)
@@ -156,7 +156,7 @@ def test_select_papers_read_imports_mark_seen(tmp_path):
         tmp_path,
         [make_doc("2601.00001"), make_doc("2601.00002")],
         events=[
-            {"t": "2026-01-03", "type": "read-import", "xid": "2601.00002"},
+            {"t": "2026-01-03", "type": "read-import", "id": "arxiv:2601.00002"},
         ],
     )
     store = make_store(tmp_path)
@@ -188,8 +188,8 @@ def test_get_paper_ignores_subscription(tmp_path):
     make_data_dir(tmp_path, [make_doc("2601.00001", categories=("math.NT",))])
     store = make_store(tmp_path, subscribed={"cs.LG"})
 
-    assert store.get_paper("2601.00001").title == "Title 2601.00001"
-    assert store.get_paper("2601.99999") is None
+    assert store.get_paper("arxiv:2601.00001").title == "Title 2601.00001"
+    assert store.get_paper("arxiv:2601.99999") is None
 
 
 # -- LocalStore: event recording and the derived seen-set ------------------------
@@ -199,7 +199,7 @@ def test_record_events_appends_and_marks_seen(tmp_path):
     store = make_store(tmp_path)
 
     store.record_events([{"type": "start", "n": 1}])
-    store.record_events([{"type": "view", "xid": "2601.00001"}])
+    store.record_events([{"type": "view", "id": "arxiv:2601.00001"}])
 
     # events land on disk, stamped
     lines = (tmp_path / "events.jsonl").read_text().splitlines()
@@ -207,7 +207,7 @@ def test_record_events_appends_and_marks_seen(tmp_path):
     assert [e["type"] for e in events] == ["start", "view"]
     assert all("t" in e for e in events)
     # and the seen-set reflects the view immediately
-    assert store.read_ids() == {"2601.00001"}
+    assert store.read_ids() == {"arxiv:2601.00001"}
     assert [p.xid for p in store.select_papers(10)] == ["2601.00002"]
 
 
@@ -223,12 +223,12 @@ def test_refresh_events_tails_the_log(tmp_path):
     # another writer appends to the log after the store loaded it
     with open(tmp_path / "events.jsonl", "a") as f:
         f.write(json.dumps(
-            {"t": "2026-01-03T10:00:05", "type": "view", "xid": "2601.00001"}
+            {"t": "2026-01-03T10:00:05", "type": "view", "id": "arxiv:2601.00001"}
         ) + "\n")
 
     assert store.read_ids() == set()      # not seen yet...
     store.refresh_events()
-    assert store.read_ids() == {"2601.00001"}
+    assert store.read_ids() == {"arxiv:2601.00001"}
     assert len(store.scan_events()) == 2
 
 
@@ -238,7 +238,7 @@ def test_refresh_events_does_not_refold_own_recordings(tmp_path):
     make_data_dir(tmp_path, [make_doc("2601.00001")])
     store = make_store(tmp_path)
 
-    store.record_events([{"type": "view", "xid": "2601.00001"}])
+    store.record_events([{"type": "view", "id": "arxiv:2601.00001"}])
     store.refresh_events()
 
     assert len(store.scan_events()) == 1
@@ -261,7 +261,7 @@ def test_status_reports_store_state(tmp_path):
             make_doc("2601.00002", date="2026-01-02"),
         ],
         events=[
-            {"t": "2026-01-03T10:00:00", "type": "view", "xid": "2601.00001"},
+            {"t": "2026-01-03T10:00:00", "type": "view", "id": "arxiv:2601.00001"},
         ],
     )
     harvest_records = [
@@ -283,7 +283,7 @@ def test_status_reports_store_state(tmp_path):
     assert status["subscribed_papers"] == 2
     assert status["seen_papers"] == 1
     assert status["events"] == 1
-    assert status["last_event"]["xid"] == "2601.00001"
+    assert status["last_event"]["id"] == "arxiv:2601.00001"
     assert status["harvests"] == harvest_records
     assert json.dumps(status)   # JSON-clean, as served over HTTP
     store.close()               # part of the interface; a no-op locally
@@ -297,7 +297,7 @@ def test_status_rereads_the_logs(tmp_path):
     # another writer appends after the store loaded the log
     with open(tmp_path / "events.jsonl", "a") as f:
         f.write(json.dumps(
-            {"t": "2026-01-03T10:00:00", "type": "view", "xid": "2601.00001"}
+            {"t": "2026-01-03T10:00:00", "type": "view", "id": "arxiv:2601.00001"}
         ) + "\n")
 
     assert store.status()["events"] == 1
@@ -328,8 +328,8 @@ def test_reading_state_queries(tmp_path):
             make_doc("9901.00001", date="1999-01-01", categories=("math.NT",)),
         ],
         events=[
-            {"t": "2026-01-03", "type": "read-import", "xid": "2601.00001"},
-            {"t": "2026-01-04T09:00:00", "type": "view", "xid": "2601.00002"},
+            {"t": "2026-01-03", "type": "read-import", "id": "arxiv:2601.00001"},
+            {"t": "2026-01-04T09:00:00", "type": "view", "id": "arxiv:2601.00002"},
         ],
     )
     store = make_store(tmp_path, subscribed={"cs.LG"})
@@ -344,8 +344,8 @@ def test_reading_state_queries(tmp_path):
     assert store.read_submit_dates() == [
         datetime.date(2026, 1, 1), datetime.date(2026, 1, 2),
     ]
-    assert store.subscribed_ids() == ["2601.00001", "2601.00002"]
-    assert store.read_ids() == {"2601.00001", "2601.00002"}
+    assert store.subscribed_ids() == ["arxiv:2601.00001", "arxiv:2601.00002"]
+    assert store.read_ids() == {"arxiv:2601.00001", "arxiv:2601.00002"}
 
 
 def test_unread_dates_respects_cutoff(tmp_path):

@@ -32,6 +32,7 @@ import time
 
 import httpx
 
+from firehose import ids
 from firehose import index
 from firehose import mirror
 from firehose import sources
@@ -114,7 +115,7 @@ class LocalStore:
         self._subscribed = subscribed
         self._lazy_dates: dict[str, datetime.date] | None = None
         self._events: list[dict] = []
-        self._seen: dict[str, datetime.date] = {}   # xid -> first-seen date
+        self._seen: dict[str, datetime.date] = {}   # id -> first-seen date
         self._events_offset = 0                     # bytes of the log consumed
         self.refresh_events()
         print(f"loaded {len(self._events)} events "
@@ -122,15 +123,15 @@ class LocalStore:
 
     @property
     def _dates(self) -> dict[str, datetime.date]:
-        """The subscribed view of the index: {xid: submission date}, in the
-        index's (date, id) order. Loaded on first use (queries that only
-        touch the event log never pay for it); the full index is not
-        retained."""
+        """The subscribed view of the index: {namespaced id: submission
+        date}, in the index's (date, id) order. Loaded on first use
+        (queries that only touch the event log never pay for it); the full
+        index is not retained."""
         if self._lazy_dates is None:
             print("loading index...")
             entries, _ = index.load_index(self._paths.index(ARXIV.source))
             self._lazy_dates = {
-                xid: entry.date
+                ids.join(ARXIV.source, xid): entry.date
                 for xid, entry in entries.items()
                 if set(entry.categories) & self._subscribed
             }
@@ -170,21 +171,24 @@ class LocalStore:
         )
         docs = mirror.read_papers(
             self._paths.mirror(ARXIV.source),
-            [xid for xid, _date in selected],
+            [ids.local(paper_id) for paper_id, _date in selected],
             shard_fn=ARXIV.shard,
         )
         return [
-            ARXIV.to_paper(docs[xid])
-            for xid, _date in selected
-            if xid in docs
+            ARXIV.to_paper(docs[ids.local(paper_id)])
+            for paper_id, _date in selected
+            if ids.local(paper_id) in docs
         ]
 
-    def get_paper(self, xid: str) -> Paper | None:
-        """One paper's metadata, any category; None if not mirrored."""
+    def get_paper(self, paper_id: str) -> Paper | None:
+        """One paper's metadata by namespaced id, any category; None if
+        not mirrored."""
+        source_name, local_id = ids.split(paper_id)
+        adapter = sources.adapter(source_name)
         doc = mirror.read_paper(
-            self._paths.mirror(ARXIV.source), xid, shard_fn=ARXIV.shard,
+            self._paths.mirror(source_name), local_id, shard_fn=adapter.shard,
         )
-        return ARXIV.to_paper(doc) if doc is not None else None
+        return adapter.to_paper(doc) if doc is not None else None
 
     # # #
     # Events
@@ -232,7 +236,7 @@ class LocalStore:
     def _fold_event(self, event: dict, date: datetime.date) -> None:
         self._events.append(event)
         if event.get("type") in ("view", "read-import"):
-            self._seen.setdefault(event["xid"], date)
+            self._seen.setdefault(event["id"], date)
 
     def close(self) -> None:
         """Nothing to settle: record_events writes synchronously."""
@@ -393,12 +397,13 @@ class RemoteStore:
         )
         return [ARXIV.to_paper(doc) for doc in docs]
 
-    def get_paper(self, xid: str) -> Paper | None:
-        """One paper's metadata, any category; None if not mirrored."""
+    def get_paper(self, paper_id: str) -> Paper | None:
+        """One paper's metadata by namespaced id, any category; None if
+        not mirrored."""
         with _notice_if_slow(
-            f"waiting on the server ({self._url}/papers/{xid})..."
+            f"waiting on the server ({self._url}/papers/{paper_id})..."
         ):
-            response = self._client.get(f"/papers/{xid}")
+            response = self._client.get(f"/papers/{paper_id}")
         if response.status_code == 404:
             return None
         response.raise_for_status()
