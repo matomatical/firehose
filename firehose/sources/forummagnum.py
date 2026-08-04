@@ -22,6 +22,12 @@ Caveats this adapter works around or accepts:
 * There is no schema stability guarantee: the query below asks for
   exactly what it needs, and any GraphQL error is fatal rather than
   worked around.
+* The sites' GraphQL layers differ: the EA Forum's silently ignores
+  view terms bound through GraphQL variables (returning the newest
+  posts whatever window was asked for), so the terms are inlined as
+  literals — which both sites honour — and every returned post is
+  checked against the requested window, making a server that ignores
+  the terms a loud failure instead of a corrupt mirror.
 """
 
 import datetime
@@ -59,10 +65,12 @@ REQUEST_RETRY_WAITS = (0.0, 5.0, 25.0)
 # Connect and read timeouts per request, in seconds.
 REQUEST_TIMEOUT = (10, 120)
 
-_POSTS_QUERY = """
-query FirehoseWindow($after: String, $before: String, $limit: Int) {
+# %-formatted (never GraphQL variables: see the module docstring) with
+# ISO date strings and an integer limit.
+_POSTS_QUERY_TEMPLATE = """
+{
   posts(input: {terms: {
-    view: "new", after: $after, before: $before, limit: $limit
+    view: "new", after: "%(after)s", before: "%(before)s", limit: %(limit)d
   }}) {
     results {
       _id
@@ -131,11 +139,11 @@ class ForumMagnumAdapter:
             month = next_month
 
     def _window(self, after: datetime.date, before: datetime.date):
-        """One window's posts, retrying transport failures; a full window
-        hit the truncation cap and is an error."""
+        """One window's posts, retrying transport failures. A full window
+        hit the truncation cap, and a post dated outside the window means
+        the server ignored the terms; both are errors."""
         payload = {
-            "query": _POSTS_QUERY,
-            "variables": {
+            "query": _POSTS_QUERY_TEMPLATE % {
                 "after": after.isoformat(),
                 "before": before.isoformat(),
                 "limit": WINDOW_CAP,
@@ -167,6 +175,15 @@ class ForumMagnumAdapter:
                 f"at the silent truncation cap, so results are incomplete; "
                 f"narrow the window"
             )
+        for raw in results:
+            posted_at = raw.get("postedAt")
+            if posted_at is None:
+                continue   # malformed post: the parse reports it instead
+            if not (after <= _posted_date(posted_at) <= before):
+                raise RuntimeError(
+                    f"window {after}..{before} returned a post dated "
+                    f"{posted_at}: the server ignored the window terms"
+                )
         return results
 
     def _parse_post(self, raw: dict) -> Record:

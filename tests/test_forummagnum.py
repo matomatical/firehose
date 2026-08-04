@@ -3,6 +3,7 @@ GraphQL responses drive the fetch loop, and the per-document mappings run
 on canned posts."""
 
 import datetime
+import re
 import types
 
 import pytest
@@ -51,8 +52,16 @@ def _install_api(monkeypatch, respond, today="2026-08-04"):
 
     def fake_post(url, json=None, headers=None, timeout=None):
         assert "matthew" in headers["User-Agent"]
-        calls.append(json["variables"])
-        body = respond(json["variables"])
+        # terms must be inlined: EAF silently ignores variable-bound terms
+        assert "variables" not in json
+        query = json["query"]
+        variables = {
+            "after": re.search(r'after: "([^"]*)"', query).group(1),
+            "before": re.search(r'before: "([^"]*)"', query).group(1),
+            "limit": int(re.search(r"limit: (\d+)", query).group(1)),
+        }
+        calls.append(variables)
+        body = respond(variables)
         if not isinstance(body, dict):
             body = {"data": {"posts": {"results": body}}}
         return types.SimpleNamespace(
@@ -107,6 +116,19 @@ def test_fetch_aborts_on_the_silent_truncation_cap(monkeypatch):
     )
     with pytest.raises(RuntimeError, match="truncation"):
         next(LW.fetch(datetime.date(2026, 8, 1)))
+
+
+def test_fetch_aborts_when_the_server_ignores_the_window(monkeypatch):
+    # the EA Forum failure mode: window terms dropped, newest posts
+    # returned for every window
+    _install_api(
+        monkeypatch,
+        lambda variables: [
+            _raw_post("new1", postedAt="2026-08-04T12:00:00.000Z"),
+        ],
+    )
+    with pytest.raises(RuntimeError, match="ignored the window"):
+        next(LW.fetch(datetime.date(2026, 5, 10)))
 
 
 def test_fetch_fails_loudly_on_graphql_errors(monkeypatch):
