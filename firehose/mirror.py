@@ -4,9 +4,11 @@ shard.
 
 Layout: `<mirror_dir>/<shard>.jsonl.gz`, one line per document, sorted by
 id. Which shard holds which id is the caller's rule — each source adapter
-names a shard for each of its ids, at a granularity to suit the source's
-volume — so readers and the Updater take the rule as a `shard_fn`
-argument; this module only requires that it is a pure function of the id.
+names a shard for each of its ids (a pure function of the id and its
+index-entry date, at a granularity to suit the source's volume) — so this
+module never computes shards itself: writers pass the shard with each
+upsert or deletion, and readers pass a `shard_fn` resolving each id they
+ask for.
 One line per document keeps the archives line-tool friendly
 (`zgrep <id> <shard>.jsonl.gz` returns a whole document; `zcat | jq`
 pretty-prints), and the fixed serialisation (key order pinned by the
@@ -94,13 +96,9 @@ def save_shard(mirror_dir: str, shard: str, docs: dict[str, dict]) -> None:
                 pass
 
 
-def read_paper(
-    mirror_dir: str,
-    xid: str,
-    shard_fn: Callable[[str], str],
-) -> dict | None:
-    """Load one document, or None if it is not in the mirror."""
-    return load_shard(mirror_dir, shard_fn(xid)).get(xid)
+def read_paper(mirror_dir: str, xid: str, shard: str) -> dict | None:
+    """Load one document from its shard, or None if it is not there."""
+    return load_shard(mirror_dir, shard).get(xid)
 
 
 def read_papers(
@@ -154,9 +152,8 @@ class Updater:
     shard touched since the last flush.
     """
 
-    def __init__(self, mirror_dir: str, shard_fn: Callable[[str], str]):
+    def __init__(self, mirror_dir: str):
         self._mirror_dir = mirror_dir
-        self._shard_fn = shard_fn
         self._shards: dict[str, dict[str, dict]] = {}
         self._dirty: set[str] = set()
 
@@ -165,14 +162,13 @@ class Updater:
             self._shards[shard] = load_shard(self._mirror_dir, shard)
         return self._shards[shard]
 
-    def upsert(self, doc: dict) -> str:
+    def upsert(self, doc: dict, shard: str) -> str:
         """
-        Add or replace one document. Returns "new" (id not in its shard),
-        "updated" (replaced a different document), or "unchanged"
-        (identical document; nothing to write).
+        Add or replace one document in `shard`. Returns "new" (id not in
+        the shard), "updated" (replaced a different document), or
+        "unchanged" (identical document; nothing to write).
         """
         xid = doc["id"]
-        shard = self._shard_fn(xid)
         docs = self._shard(shard)
         existing = docs.get(xid)
         if existing == doc:
@@ -181,10 +177,10 @@ class Updater:
         self._dirty.add(shard)
         return "updated" if existing is not None else "new"
 
-    def delete(self, xid: str) -> bool:
-        """Remove one document (the record was deleted upstream). Returns
+    def delete(self, xid: str, shard: str) -> bool:
+        """Remove one document from `shard` (the record was deleted
+        upstream, or its date moved it to a different shard). Returns
         whether it was present."""
-        shard = self._shard_fn(xid)
         docs = self._shard(shard)
         if xid not in docs:
             return False

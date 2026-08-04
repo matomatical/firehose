@@ -45,12 +45,10 @@ def make_data_dir(data_dir, docs: list[dict], events: list[dict] = ()) -> None:
     its "t" timestamp) onto the event log.
     """
     entries = {}
-    updater = mirror.Updater(
-        str(data_dir / "mirror" / "arxiv"),
-        shard_fn=sources.adapter("arxiv").shard,
-    )
+    shard_fn = sources.adapter("arxiv").shard
+    updater = mirror.Updater(str(data_dir / "mirror" / "arxiv"))
     for doc in docs:
-        updater.upsert(doc)
+        updater.upsert(doc, shard_fn(doc["id"]))
         entries[doc["id"]] = index.Entry(
             date=datetime.date.fromisoformat(doc["oai_datestamp"]),
             categories=tuple(doc["categories"]),

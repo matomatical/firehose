@@ -56,7 +56,7 @@ def _raw_record(xid, *, datestamp, submitted=None, deleted=False, title="T"):
 def test_apply_upserts_and_deletes(tmp_path):
     mirror_dir = str(tmp_path)
     entries = {}
-    updater = mirror_store.Updater(mirror_dir, shard_fn=ARXIV.shard)
+    updater = mirror_store.Updater(mirror_dir)
     live = _record(arxivraw.parse_record(_raw_record(
         "2606.00001",
         datestamp="2026-06-02",
@@ -87,14 +87,12 @@ def test_apply_upserts_and_deletes(tmp_path):
         "deleted-absent"
     )
     updater.flush()
-    assert mirror_store.read_paper(
-        mirror_dir, "2606.00001", shard_fn=ARXIV.shard,
-    ) is None
+    assert mirror_store.read_paper(mirror_dir, "2606.00001", "2606") is None
 
 
 def _configure_mirror(monkeypatch, tmp_path, records, expect_identify):
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[paths]\ndata = "data"\n')
+    config_path.write_text('[paths]\ndata = "data"\n\n[sources.arxiv]\n')
 
     class FakeSickle:
         def __init__(self, endpoint, **kwargs):
@@ -134,7 +132,7 @@ def test_mirror_end_to_end_then_resumes_from_watermark(tmp_path, monkeypatch):
     harvest_module.mirror(config_path=config_path)
 
     doc = mirror_store.read_paper(
-        str(data_dir / "mirror" / "arxiv"), "2606.00001", shard_fn=ARXIV.shard,
+        str(data_dir / "mirror" / "arxiv"), "2606.00001", "2606",
     )
     assert doc["title"] == "T"
     entries, watermark = index.load_index(str(data_dir / "index" / "arxiv.txt"))

@@ -103,11 +103,12 @@ class ArxivAdapter:
             if len(batch) < BATCH_SIZE:
                 return
 
-    def shard(self, xid: str) -> str:
+    def shard(self, xid: str, date: datetime.date | None = None) -> str:
         """The submission-month (YYMM) shard name for a paper id: the
         part before the dot for modern ids ("2003.14184" -> "2003"), the
         first four digits after the slash for pre-2007 ids
-        ("math/0211159" -> "0211")."""
+        ("math/0211159" -> "0211"). The id encodes its own month, so the
+        entry date is unused."""
         if "/" in xid:
             return xid.split("/", 1)[1][:4]
         return xid.split(".", 1)[0]

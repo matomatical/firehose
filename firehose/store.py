@@ -218,15 +218,19 @@ class LocalStore:
             offset=offset,
             rng=rng,
         )
-        by_source: dict[str, list[str]] = {}
-        for paper_id, _date in selected:
+        by_source: dict[str, dict[str, datetime.date]] = {}
+        for paper_id, date in selected:
             name, local_id = ids.split(paper_id)
-            by_source.setdefault(name, []).append(local_id)
+            by_source.setdefault(name, {})[local_id] = date
         papers = {}
-        for name, local_ids in by_source.items():
+        for name, dates in by_source.items():
             adapter, _section = self._sources[name]
             docs = mirror.read_papers(
-                self._paths.mirror(name), local_ids, shard_fn=adapter.shard,
+                self._paths.mirror(name),
+                list(dates),
+                shard_fn=lambda local_id: adapter.shard(
+                    local_id, dates[local_id],
+                ),
             )
             for local_id, doc in docs.items():
                 papers[ids.join(name, local_id)] = adapter.to_paper(doc)
@@ -238,11 +242,16 @@ class LocalStore:
 
     def get_paper(self, paper_id: str) -> Paper | None:
         """One paper's metadata by namespaced id, any category; None if
-        not mirrored."""
+        not mirrored. The shard lookup takes the paper's index date where
+        the subscribed view knows it; a source whose shard rule needs the
+        date subscribes to everything, so only unmirrored ids miss."""
         source_name, local_id = ids.split(paper_id)
         adapter = sources.adapter(source_name)
+        shard = adapter.shard(local_id, self._dates.get(paper_id))
+        if shard is None:
+            return None
         doc = mirror.read_paper(
-            self._paths.mirror(source_name), local_id, shard_fn=adapter.shard,
+            self._paths.mirror(source_name), local_id, shard,
         )
         return adapter.to_paper(doc) if doc is not None else None
 

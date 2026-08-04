@@ -26,21 +26,37 @@ def mirror(
     config_path: str = util.CONFIG_PATH,
     data_dir: str | None = None,
     checkpoint_batches: int = 25,
+    source: str | None = None,
 ):
     """
-    Download new and updated records into each source's metadata mirror,
-    maintaining the derived indexes and their watermarks. (arXiv is the
-    sole source so far.)
+    Download new and updated records into each configured source's
+    metadata mirror, maintaining the derived indexes and their watermarks.
+    `source` harvests just that one source; `expected_total` and
+    `num_batches` describe a single source's run, so they require one.
     """
     config = util.load_config(config_path)
     paths = util.data_paths(config, data_dir=data_dir)
-    _harvest(
-        sources.adapter("arxiv"),
-        paths,
-        expected_total=expected_total,
-        num_batches=num_batches,
-        checkpoint_batches=checkpoint_batches,
-    )
+    if source is not None and source not in config["sources"]:
+        raise SystemExit(
+            f"source {source!r} is not configured "
+            f"(configured: {', '.join(config['sources'])})"
+        )
+    names = [source] if source is not None else list(config["sources"])
+    if len(names) > 1 and not (expected_total is None and num_batches is None):
+        raise SystemExit(
+            "--expected-total/--num-batches describe one source's run; "
+            "add --source to say which"
+        )
+    for name in names:
+        if len(names) > 1:
+            print(f"# {name}")
+        _harvest(
+            sources.adapter(name),
+            paths,
+            expected_total=expected_total,
+            num_batches=num_batches,
+            checkpoint_batches=checkpoint_batches,
+        )
     print("done.")
 
 
@@ -105,7 +121,7 @@ def _harvest(
         disable=None,
     )
     totals = collections.Counter()
-    updater = mirror_store.Updater(mirror_dir, shard_fn=adapter.shard)
+    updater = mirror_store.Updater(mirror_dir)
     completed = False   # reached the end of the query (vs interrupted/partial)
     try:
         for batch_number in (
@@ -227,11 +243,28 @@ def _apply(
     index entries. Returns "new", "updated", or "unchanged" for live
     records (per the mirror upsert), or "deleted" / "deleted-absent" for
     records deleted upstream (per whether there was a document to remove).
+
+    Shards come from the adapter's rule over the id and its entry date:
+    the old entry locates the copy a deletion (or a date change moving
+    the document between shards) must remove, and the new entry places
+    the upsert.
     """
+    old_entry = entries.get(record.id)
+    old_date = old_entry.date if old_entry is not None else None
     if record.doc is None:
-        existed = updater.delete(record.id)
+        old_shard = adapter.shard(record.id, old_date)
+        existed = (
+            updater.delete(record.id, old_shard)
+            if old_shard is not None else False
+        )
         entries.pop(record.id, None)
         return "deleted" if existed else "deleted-absent"
-    status = updater.upsert(record.doc)
-    entries[record.id] = adapter.entry(record.doc)
+    new_entry = adapter.entry(record.doc)
+    new_shard = adapter.shard(record.id, new_entry.date)
+    if old_date is not None:
+        old_shard = adapter.shard(record.id, old_date)
+        if old_shard is not None and old_shard != new_shard:
+            updater.delete(record.id, old_shard)
+    status = updater.upsert(record.doc, new_shard)
+    entries[record.id] = new_entry
     return status

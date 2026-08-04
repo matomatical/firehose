@@ -190,10 +190,8 @@ def test_select_papers_drops_ids_missing_from_mirror(tmp_path):
     from firehose import sources
 
     make_data_dir(tmp_path, [make_doc("2601.00001"), make_doc("2601.00002")])
-    updater = mirror.Updater(
-        str(tmp_path / "mirror" / "arxiv"), shard_fn=sources.adapter("arxiv").shard,
-    )
-    updater.delete("2601.00001")
+    updater = mirror.Updater(str(tmp_path / "mirror" / "arxiv"))
+    updater.delete("2601.00001", sources.adapter("arxiv").shard("2601.00001"))
     updater.flush()
     store = make_store(tmp_path)
 
@@ -388,7 +386,7 @@ class _FakeAdapter:
 
     source = "fake"
 
-    def shard(self, local_id):
+    def shard(self, local_id, date=None):
         return "all"
 
     def subscription(self, section):

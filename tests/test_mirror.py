@@ -8,8 +8,8 @@ from firehose import mirror
 from firehose import sources
 
 
-# the arXiv shard rule (submission month) stands in for "any pure function
-# of the id" throughout; the rule itself is tested with the adapter
+# the arXiv shard rule (submission month, from the id alone) stands in for
+# "any shard rule" throughout; the rule itself is tested with the adapter
 SHARD_FN = sources.adapter("arxiv").shard
 
 
@@ -44,10 +44,10 @@ def test_save_load_shard_roundtrip(tmp_path):
 
     assert mirror.load_shard(mirror_dir, "2003") == docs
     assert mirror.load_shard(mirror_dir, "1999") == {}
-    assert mirror.read_paper(mirror_dir, "2003.14184", shard_fn=SHARD_FN)[
+    assert mirror.read_paper(mirror_dir, "2003.14184", "2003")[
         "title"
     ] == "Ünïcode Title"
-    assert mirror.read_paper(mirror_dir, "2003.99999", shard_fn=SHARD_FN) is None
+    assert mirror.read_paper(mirror_dir, "2003.99999", "2003") is None
 
     # one line per doc, sorted by id, unicode stored raw (not escaped)
     with gzip.open(mirror.shard_path(mirror_dir, "2003"), "rt") as f:
@@ -82,8 +82,8 @@ def test_read_papers_groups_by_shard(tmp_path):
     mirror_dir = str(tmp_path)
     xids = ["2003.14184", "math/0211159", "2003.00001"]
     for xid in xids:
-        updater = mirror.Updater(mirror_dir, shard_fn=SHARD_FN)
-        updater.upsert(_doc(xid))
+        updater = mirror.Updater(mirror_dir)
+        updater.upsert(_doc(xid), SHARD_FN(xid))
         updater.flush()
 
     found = mirror.read_papers(
@@ -95,9 +95,9 @@ def test_read_papers_groups_by_shard(tmp_path):
 
 def test_iter_papers_sorted_with_no_temp_leftovers(tmp_path):
     mirror_dir = str(tmp_path)
-    updater = mirror.Updater(mirror_dir, shard_fn=SHARD_FN)
+    updater = mirror.Updater(mirror_dir)
     for xid in ["2003.14184", "math/0211159", "2003.00001"]:
-        updater.upsert(_doc(xid))
+        updater.upsert(_doc(xid), SHARD_FN(xid))
     updater.flush()
 
     assert [d["id"] for d in mirror.iter_papers(mirror_dir)] == [
@@ -113,25 +113,23 @@ def test_updater_upsert_delete_statuses(tmp_path):
     mirror_dir = str(tmp_path)
     doc = _doc("2003.14184")
 
-    updater = mirror.Updater(mirror_dir, shard_fn=SHARD_FN)
-    assert updater.upsert(doc) == "new"
-    assert updater.upsert(doc) == "unchanged"
+    updater = mirror.Updater(mirror_dir)
+    assert updater.upsert(doc, "2003") == "new"
+    assert updater.upsert(doc, "2003") == "unchanged"
     revised = _doc("2003.14184", title="A New Title")
-    assert updater.upsert(revised) == "updated"
+    assert updater.upsert(revised, "2003") == "updated"
     updater.flush()
-    assert mirror.read_paper(mirror_dir, "2003.14184", shard_fn=SHARD_FN)[
+    assert mirror.read_paper(mirror_dir, "2003.14184", "2003")[
         "title"
     ] == "A New Title"
 
     # a fresh updater sees the flushed state
-    updater = mirror.Updater(mirror_dir, shard_fn=SHARD_FN)
-    assert updater.upsert(revised) == "unchanged"
-    assert updater.delete("2003.14184") is True
-    assert updater.delete("2003.14184") is False
+    updater = mirror.Updater(mirror_dir)
+    assert updater.upsert(revised, "2003") == "unchanged"
+    assert updater.delete("2003.14184", "2003") is True
+    assert updater.delete("2003.14184", "2003") is False
     updater.flush()
-    assert mirror.read_paper(
-        mirror_dir, "2003.14184", shard_fn=SHARD_FN,
-    ) is None
+    assert mirror.read_paper(mirror_dir, "2003.14184", "2003") is None
     assert mirror.shards(mirror_dir) == []   # emptied shard archive removed
 
 
@@ -140,9 +138,11 @@ def test_updater_flush_only_rewrites_dirty_shards(tmp_path):
     mirror.save_shard(mirror_dir, "2003", {"2003.00001": _doc("2003.00001")})
     untouched = os.stat(mirror.shard_path(mirror_dir, "2003")).st_mtime_ns
 
-    updater = mirror.Updater(mirror_dir, shard_fn=SHARD_FN)
-    assert updater.upsert(_doc("2003.00001")) == "unchanged"   # loads, no dirt
-    updater.upsert(_doc("2004.00001"))
+    updater = mirror.Updater(mirror_dir)
+    assert updater.upsert(_doc("2003.00001"), "2003") == (
+        "unchanged"                                    # loads, no dirt
+    )
+    updater.upsert(_doc("2004.00001"), "2004")
     updater.flush()
 
     assert os.stat(mirror.shard_path(mirror_dir, "2003")).st_mtime_ns == (

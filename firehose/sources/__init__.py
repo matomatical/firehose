@@ -16,8 +16,12 @@ work against:
   its place, so the runner can count it and continue. Politeness (rate
   limiting, batch sizing) lives inside; a batch smaller than the source's
   full batch size is the last.
-* `shard(id)` — which mirror archive holds this id (each source shards at
-  a granularity to suit its volume).
+* `shard(id, date)` — which mirror archive holds this id, given the id's
+  index-entry date (each source shards at a granularity to suit its
+  volume). The rule is a pure function of (id, date); a source whose ids
+  encode their own dates ignores `date` and accepts None, while a source
+  with date-based shards and opaque ids returns None for an unknown date
+  (the document is not locatable without its entry).
 * `subscription(section)` — the subscribed-entry predicate for the
   source's config section: which index entries the reading queries range
   over (arXiv: category overlap; a broad source may subscribe to
