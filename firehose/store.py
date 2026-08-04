@@ -342,9 +342,13 @@ class LocalStore:
     # # #
     # Reading-state queries (pre-shaped for the visualisation commands)
 
-    def submitted_dates(self) -> list[datetime.date]:
-        """Submission dates of every subscribed paper, in (date, id) order."""
-        return list(self._dates.values())
+    def submitted_dates(self, source: str | None = None) -> list[datetime.date]:
+        """Submission dates of every subscribed paper, in (date, id) order
+        (`source` narrows to one source)."""
+        return [
+            date for paper_id, date in self._dates.items()
+            if source is None or ids.source(paper_id) == source
+        ]
 
     def unread_dates(
         self, modern: bool = True, source: str | None = None,
@@ -360,18 +364,30 @@ class LocalStore:
             )
         ]
 
-    def read_dates(self) -> list[datetime.date]:
-        """Each seen paper's first-seen date, in first-seen order."""
-        return list(self._seen.values())
+    def read_dates(self, source: str | None = None) -> list[datetime.date]:
+        """Each seen paper's first-seen date, in first-seen order
+        (`source` narrows to one source)."""
+        return [
+            date for paper_id, date in self._seen.items()
+            if source is None or ids.source(paper_id) == source
+        ]
 
-    def read_submit_dates(self) -> list[datetime.date]:
+    def read_submit_dates(self, source: str | None = None) -> list[datetime.date]:
         """Submission dates of the seen papers (ids that have since left
-        the subscribed view are dropped)."""
-        return stats.read_submit_dates(self._seen, self._dates)
+        the subscribed view are dropped; `source` narrows to one source)."""
+        seen = {
+            paper_id: date for paper_id, date in self._seen.items()
+            if source is None or ids.source(paper_id) == source
+        }
+        return stats.read_submit_dates(seen, self._dates)
 
-    def subscribed_ids(self) -> list[str]:
-        """Every subscribed paper's id, in (date, id) order."""
-        return list(self._dates)
+    def subscribed_ids(self, source: str | None = None) -> list[str]:
+        """Every subscribed paper's id, in (date, id) order (`source`
+        narrows to one source)."""
+        return [
+            paper_id for paper_id in self._dates
+            if source is None or ids.source(paper_id) == source
+        ]
 
     def read_ids(self) -> set[str]:
         """The seen-set."""
@@ -592,8 +608,8 @@ class RemoteStore:
     # # #
     # Reading-state queries (pre-shaped for the visualisation commands)
 
-    def submitted_dates(self) -> list[datetime.date]:
-        return _dates(self._get("/stats/submitted-dates"))
+    def submitted_dates(self, source: str | None = None) -> list[datetime.date]:
+        return _dates(self._get("/stats/submitted-dates", source=source))
 
     def unread_dates(
         self, modern: bool = True, source: str | None = None,
@@ -602,14 +618,14 @@ class RemoteStore:
             "/stats/unread-dates", modern=modern, source=source,
         ))
 
-    def read_dates(self) -> list[datetime.date]:
-        return _dates(self._get("/stats/read-dates"))
+    def read_dates(self, source: str | None = None) -> list[datetime.date]:
+        return _dates(self._get("/stats/read-dates", source=source))
 
-    def read_submit_dates(self) -> list[datetime.date]:
-        return _dates(self._get("/stats/read-submit-dates"))
+    def read_submit_dates(self, source: str | None = None) -> list[datetime.date]:
+        return _dates(self._get("/stats/read-submit-dates", source=source))
 
-    def subscribed_ids(self) -> list[str]:
-        return self._get("/stats/subscribed-ids")
+    def subscribed_ids(self, source: str | None = None) -> list[str]:
+        return self._get("/stats/subscribed-ids", source=source)
 
     def read_ids(self) -> set[str]:
         return set(self._get("/stats/read-ids"))

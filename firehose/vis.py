@@ -17,6 +17,7 @@ def _store(config: dict, data_dir: str | None):
 
 
 def all_submitted_dates(
+    source: str | None = None,
     config_path: str = util.CONFIG_PATH,
     data_dir: str | None = None,
     save_as: str | None = None,
@@ -25,7 +26,7 @@ def all_submitted_dates(
     store = _store(config, data_dir)
 
     print("printing calendar...")
-    dates = store.submitted_dates()
+    dates = store.submitted_dates(source=source)
     vis = vis_dates(dates)
     print(vis)
 
@@ -67,6 +68,7 @@ def unread(
 
 
 def all_submitted_years(
+    source: str | None = None,
     config_path: str = util.CONFIG_PATH,
     data_dir: str | None = None,
 ):
@@ -74,7 +76,7 @@ def all_submitted_years(
     store = _store(config, data_dir)
 
     years = collections.Counter([
-        date.year for date in store.submitted_dates()
+        date.year for date in store.submitted_dates(source=source)
     ])
 
     print("printing calendar...")
@@ -83,6 +85,7 @@ def all_submitted_years(
 
 
 def all_submitted_months(
+    source: str | None = None,
     config_path: str = util.CONFIG_PATH,
     data_dir: str | None = None,
 ):
@@ -90,7 +93,8 @@ def all_submitted_months(
     store = _store(config, data_dir)
 
     year_months = collections.Counter([
-        (date.year, date.month) for date in store.submitted_dates()
+        (date.year, date.month)
+        for date in store.submitted_dates(source=source)
     ])
 
     print("printing calendar...")
@@ -104,6 +108,7 @@ def reading_calendar(
         "submit-date",
         "proportion",
     ] = "read-date",
+    source: str | None = None,
     config_path: str = util.CONFIG_PATH,
     data_dir: str | None = None,
     save_as: str | None = None,
@@ -113,15 +118,15 @@ def reading_calendar(
 
     print("printing calendar...")
     if mode == "read-date":
-        vis = vis_dates(store.read_dates())
+        vis = vis_dates(store.read_dates(source=source))
 
     elif mode == "submit-date":
-        vis = vis_dates(store.read_submit_dates())
+        vis = vis_dates(store.read_submit_dates(source=source))
 
     elif mode == "proportion":
         vis = vis_dates(
-            dates=store.read_submit_dates(),
-            all_dates=store.submitted_dates(),
+            dates=store.read_submit_dates(source=source),
+            all_dates=store.submitted_dates(source=source),
         )
 
     print(vis)
@@ -132,6 +137,7 @@ def reading_calendar(
 
 
 def linear(
+    source: str | None = None,
     config_path: str = util.CONFIG_PATH,
     data_dir: str | None = None,
     batch_size: int = 100,
@@ -142,7 +148,7 @@ def linear(
 
     print("printing visualisation...")
     vis = vis_all(
-        all_xids=store.subscribed_ids(),
+        all_xids=store.subscribed_ids(source=source),
         read_xids=list(store.read_ids()),
         batch_size=batch_size,
     )
@@ -156,12 +162,16 @@ def linear(
 def hilbert(
     live: bool = False,
     size: int | None = None,
+    source: str | None = None,
     config_path: str = util.CONFIG_PATH,
     data_dir: str | None = None,
 ):
     config = util.load_config(config_path)
     store = _store(config, data_dir)
-    all_xids = {xid: i for i, xid in enumerate(store.subscribed_ids())}
+    all_xids = {
+        xid: i
+        for i, xid in enumerate(store.subscribed_ids(source=source))
+    }
 
     print("starting read loop...")
     read_vec = [False] * len(all_xids)

@@ -474,6 +474,32 @@ def test_multi_source_dates_merge_sorted(tmp_path, monkeypatch):
     assert papers[1].title == "Title 2601.00003"
 
 
+def test_reading_state_queries_narrow_by_source(tmp_path, monkeypatch):
+    make_data_dir(
+        tmp_path,
+        [make_doc("2601.00001", date="2026-01-01")],
+        events=[
+            {"t": "2026-01-05T10:00:00", "type": "view", "id": "arxiv:2601.00001"},
+            {"t": "2026-01-06T10:00:00", "type": "view", "id": "fake:q2"},
+        ],
+    )
+    _fake_source(tmp_path, {
+        "q2": datetime.date(2026, 1, 2),
+        "q4": datetime.date(2026, 1, 4),
+    }, monkeypatch)
+    store = _two_source_store(tmp_path)
+
+    assert store.subscribed_ids(source="fake") == ["fake:q2", "fake:q4"]
+    assert store.submitted_dates(source="fake") == [
+        datetime.date(2026, 1, 2), datetime.date(2026, 1, 4),
+    ]
+    assert store.read_dates(source="fake") == [datetime.date(2026, 1, 6)]
+    assert store.read_submit_dates(source="fake") == [datetime.date(2026, 1, 2)]
+    # and unfiltered queries still cover everything
+    assert len(store.subscribed_ids()) == 3
+    assert len(store.read_dates()) == 2
+
+
 def test_multi_source_source_narrowing_and_cutoffs(tmp_path, monkeypatch):
     make_data_dir(tmp_path, [make_doc("2601.00001", date="2026-01-01")])
     _fake_source(tmp_path, {

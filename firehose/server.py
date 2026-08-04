@@ -74,8 +74,8 @@ def create_app(store: LocalStore) -> FastAPI:
         return {"server_started": started, **store.status()}
 
     @app.get("/stats/submitted-dates")
-    def submitted_dates() -> list[str]:
-        return [d.isoformat() for d in store.submitted_dates()]
+    def submitted_dates(source: str | None = None) -> list[str]:
+        return [d.isoformat() for d in store.submitted_dates(source=source)]
 
     @app.get("/stats/unread-dates")
     def unread_dates(
@@ -87,16 +87,18 @@ def create_app(store: LocalStore) -> FastAPI:
         ]
 
     @app.get("/stats/read-dates")
-    def read_dates() -> list[str]:
-        return [d.isoformat() for d in store.read_dates()]
+    def read_dates(source: str | None = None) -> list[str]:
+        return [d.isoformat() for d in store.read_dates(source=source)]
 
     @app.get("/stats/read-submit-dates")
-    def read_submit_dates() -> list[str]:
-        return [d.isoformat() for d in store.read_submit_dates()]
+    def read_submit_dates(source: str | None = None) -> list[str]:
+        return [
+            d.isoformat() for d in store.read_submit_dates(source=source)
+        ]
 
     @app.get("/stats/subscribed-ids")
-    def subscribed_ids() -> list[str]:
-        return store.subscribed_ids()
+    def subscribed_ids(source: str | None = None) -> list[str]:
+        return store.subscribed_ids(source=source)
 
     @app.get("/stats/read-ids")
     def read_ids() -> list[str]:
