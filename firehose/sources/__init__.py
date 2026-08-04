@@ -51,4 +51,7 @@ def adapter(source: str):
     if source == "arxiv":
         from firehose.sources import arxiv
         return arxiv.ADAPTER
+    if source in ("lw", "eaf"):
+        from firehose.sources import forummagnum
+        return forummagnum.ADAPTERS[source]
     raise ValueError(f"unknown source: {source}")
