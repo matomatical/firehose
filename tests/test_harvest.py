@@ -6,11 +6,22 @@ import types
 
 from lxml import etree
 
-from firehose import arxivraw
 from firehose import harvest as harvest_module
 from firehose import index
 from firehose import mirror as mirror_store
-from firehose import util
+from firehose import sources
+from firehose.sources import arxiv as arxiv_module
+from firehose.sources import arxivraw
+
+ARXIV = sources.adapter("arxiv")
+
+
+def _record(parsed: arxivraw.ParsedRecord) -> sources.Record:
+    """The fetched-record shape the runner consumes, from a parsed OAI
+    record (the conversion the adapter's fetch performs)."""
+    return sources.Record(
+        id=parsed.xid, datestamp=parsed.datestamp, doc=parsed.doc,
+    )
 
 
 def _raw_record(xid, *, datestamp, submitted=None, deleted=False, title="T"):
@@ -45,38 +56,40 @@ def _raw_record(xid, *, datestamp, submitted=None, deleted=False, title="T"):
 def test_apply_upserts_and_deletes(tmp_path):
     mirror_dir = str(tmp_path)
     entries = {}
-    updater = mirror_store.Updater(mirror_dir)
-    live = arxivraw.parse_record(_raw_record(
+    updater = mirror_store.Updater(mirror_dir, shard_fn=ARXIV.shard)
+    live = _record(arxivraw.parse_record(_raw_record(
         "2606.00001",
         datestamp="2026-06-02",
         submitted="Mon, 01 Jun 2026 10:00:00 GMT",
-    ).xml)
+    ).xml))
 
-    assert harvest_module._apply(live, entries, updater) == "new"
+    assert harvest_module._apply(live, entries, updater, ARXIV) == "new"
     assert entries["2606.00001"] == index.Entry(
         date=datetime.date(2026, 6, 1),
         categories=("cs.AI", "math.ST"),
     )
-    assert harvest_module._apply(live, entries, updater) == "unchanged"
+    assert harvest_module._apply(live, entries, updater, ARXIV) == "unchanged"
 
-    revised = arxivraw.parse_record(_raw_record(
+    revised = _record(arxivraw.parse_record(_raw_record(
         "2606.00001",
         datestamp="2026-06-03",
         submitted="Mon, 01 Jun 2026 10:00:00 GMT",
         title="Revised",
-    ).xml)
-    assert harvest_module._apply(revised, entries, updater) == "updated"
+    ).xml))
+    assert harvest_module._apply(revised, entries, updater, ARXIV) == "updated"
 
-    deleted = arxivraw.parse_record(_raw_record(
+    deleted = _record(arxivraw.parse_record(_raw_record(
         "2606.00001", datestamp="2026-06-04", deleted=True,
-    ).xml)
-    assert harvest_module._apply(deleted, entries, updater) == "deleted"
+    ).xml))
+    assert harvest_module._apply(deleted, entries, updater, ARXIV) == "deleted"
     assert "2606.00001" not in entries
-    assert harvest_module._apply(deleted, entries, updater) == (
+    assert harvest_module._apply(deleted, entries, updater, ARXIV) == (
         "deleted-absent"
     )
     updater.flush()
-    assert mirror_store.read_paper(mirror_dir, "2606.00001") is None
+    assert mirror_store.read_paper(
+        mirror_dir, "2606.00001", shard_fn=ARXIV.shard,
+    ) is None
 
 
 def _configure_mirror(monkeypatch, tmp_path, records, expect_identify):
@@ -85,7 +98,7 @@ def _configure_mirror(monkeypatch, tmp_path, records, expect_identify):
 
     class FakeSickle:
         def __init__(self, endpoint, **kwargs):
-            assert endpoint == util.OAI_API_URL
+            assert endpoint == arxiv_module.OAI_API_URL
 
         def Identify(self):
             assert expect_identify, "Identify called despite existing index"
@@ -94,17 +107,17 @@ def _configure_mirror(monkeypatch, tmp_path, records, expect_identify):
         def ListRecords(self, **kwargs):
             assert kwargs["metadataPrefix"] == "arXivRaw"
             if not records:
-                raise harvest_module.NoRecordsMatch
+                raise arxiv_module.NoRecordsMatch
             return iter(records)
 
-    monkeypatch.setattr(harvest_module, "Sickle", FakeSickle)
+    monkeypatch.setattr(arxiv_module, "Sickle", FakeSickle)
     # a patched Sickle stops _load_sickle importing the real library, so the
     # exception the except clause names needs patching in too
     monkeypatch.setattr(
-        harvest_module, "NoRecordsMatch", type("NoRecordsMatch", (Exception,), {}),
+        arxiv_module, "NoRecordsMatch", type("NoRecordsMatch", (Exception,), {}),
     )
-    monkeypatch.setattr(harvest_module, "BATCH_SIZE", len(records) + 1)
-    monkeypatch.setattr(harvest_module.time, "sleep", lambda _: None)
+    monkeypatch.setattr(arxiv_module, "BATCH_SIZE", len(records) + 1)
+    monkeypatch.setattr(arxiv_module.time, "sleep", lambda _: None)
     return str(config_path), tmp_path / "data"
 
 
@@ -120,7 +133,9 @@ def test_mirror_end_to_end_then_resumes_from_watermark(tmp_path, monkeypatch):
 
     harvest_module.mirror(config_path=config_path)
 
-    doc = mirror_store.read_paper(str(data_dir / "mirror" / "arxiv"), "2606.00001")
+    doc = mirror_store.read_paper(
+        str(data_dir / "mirror" / "arxiv"), "2606.00001", shard_fn=ARXIV.shard,
+    )
     assert doc["title"] == "T"
     entries, watermark = index.load_index(str(data_dir / "index" / "arxiv.txt"))
     assert watermark == datetime.date(2026, 6, 3)

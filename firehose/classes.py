@@ -1,6 +1,6 @@
 import sys
 
-from firehose import util
+from firehose.sources import arxiv
 
 
 def classes():
@@ -13,7 +13,7 @@ def classes():
     """
     from sickle import Sickle   # deferred: the CLI imports this module always
 
-    sickle = Sickle(util.OAI_API_URL)
+    sickle = Sickle(arxiv.OAI_API_URL)
     # dict dedupes the duplicate setSpecs arXiv's ListSets returns (e.g. gr-qc)
     catalog = sorted({s.setSpec: s.setName for s in sickle.ListSets()}.items())
     width = max((len(spec) for spec, _ in catalog), default=0)

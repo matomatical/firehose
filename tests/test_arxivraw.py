@@ -5,7 +5,7 @@ import datetime
 import pytest
 from lxml import etree
 
-from firehose import arxivraw
+from firehose.sources import arxivraw
 
 
 def _record(xid, datestamp, metadata=None, deleted=False):

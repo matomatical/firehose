@@ -9,6 +9,7 @@ import json
 
 from firehose import index
 from firehose import mirror
+from firehose import sources
 from firehose import util
 
 
@@ -44,7 +45,10 @@ def make_data_dir(data_dir, docs: list[dict], events: list[dict] = ()) -> None:
     its "t" timestamp) onto the event log.
     """
     entries = {}
-    updater = mirror.Updater(str(data_dir / "mirror" / "arxiv"))
+    updater = mirror.Updater(
+        str(data_dir / "mirror" / "arxiv"),
+        shard_fn=sources.adapter("arxiv").shard,
+    )
     for doc in docs:
         updater.upsert(doc)
         entries[doc["id"]] = index.Entry(

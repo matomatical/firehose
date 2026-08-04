@@ -17,9 +17,6 @@ import tqdm
 # firehose config
 CONFIG_PATH = "config.toml"
 
-# arXiv's OAI-PMH endpoint, shared by `harvest` and `classes`.
-OAI_API_URL = "https://oaipmh.arxiv.org/oai"
-
 # Connect and per-chunk read timeouts for PDF downloads, in seconds. The read
 # timeout is not a cap on the whole download; it bounds how long the server may
 # stop sending bytes before Requests raises.

@@ -1,34 +1,23 @@
+"""
+The `firehose mirror` command: a source-generic harvest runner. For each
+source, the runner asks the source's adapter for everything upstream has
+touched since the index's watermark and applies it to the source's mirror
+and index, checkpointing along the way so an interrupted run resumes from
+near where it stopped. Everything source-specific — the upstream API, the
+normalisation, politeness — lives behind the adapter's `fetch`.
+"""
+
 import collections
 import datetime
 import itertools
 import os
-import time
 
 import tqdm
 
-from firehose import arxivraw
 from firehose import index
 from firehose import mirror as mirror_store
+from firehose import sources
 from firehose import util
-
-
-MAX_RPS = 1/3
-BATCH_SIZE = 3_500
-
-# The OAI client library is imported on first use rather than here: this
-# module is imported by the CLI on every command, and only `mirror` (a
-# server-side job) actually harvests.
-Sickle = None
-NoRecordsMatch = None
-
-
-def _load_sickle():
-    global Sickle, NoRecordsMatch
-    if Sickle is None:
-        from sickle import Sickle as sickle_client
-        from sickle.oaiexceptions import NoRecordsMatch as no_records_match
-        Sickle = sickle_client
-        NoRecordsMatch = no_records_match
 
 
 def mirror(
@@ -39,27 +28,40 @@ def mirror(
     checkpoint_batches: int = 25,
 ):
     """
-    Download new and updated arXiv records (all categories) into the
-    metadata mirror, maintaining the derived index and its watermark.
+    Download new and updated records into each source's metadata mirror,
+    maintaining the derived indexes and their watermarks. (arXiv is the
+    sole source so far.)
     """
     config = util.load_config(config_path)
     paths = util.data_paths(config, data_dir=data_dir)
-    mirror_dir = paths.mirror("arxiv")
-    index_path = paths.index("arxiv")
+    _harvest(
+        sources.adapter("arxiv"),
+        paths,
+        expected_total=expected_total,
+        num_batches=num_batches,
+        checkpoint_batches=checkpoint_batches,
+    )
+    print("done.")
+
+
+def _harvest(
+    adapter,
+    paths: util.DataPaths,
+    *,
+    expected_total: int | None,
+    num_batches: int | None,
+    checkpoint_batches: int,
+) -> None:
+    """Harvest one source: fetch records since its index's watermark and
+    apply them to its mirror and index."""
+    mirror_dir = paths.mirror(adapter.source)
+    index_path = paths.index(adapter.source)
     util.ensure_data_dir(paths)
     os.makedirs(mirror_dir, exist_ok=True)
     os.makedirs(os.path.dirname(index_path), exist_ok=True)
-    _load_sickle()
     run_start = datetime.datetime.now().isoformat()
 
-    # configure client; retries ride out transient 503s (the server sets
-    # Retry-After) so long unattended runs survive them. The generous read
-    # timeout is for deep ListRecords pages, which the server can take tens
-    # of seconds to prepare; timeouts still get through it (they abort the
-    # run, the index checkpoint keeps the watermark, and a rerun resumes).
-    sickle = Sickle(util.OAI_API_URL, max_retries=10, timeout=180)
-
-    # load the index, or start a fresh mirror from the dawn of the archive
+    # load the index, or start a fresh mirror from the source's beginning
     if os.path.exists(index_path):
         print("loading index...")
         entries, watermark = index.load_index(index_path)
@@ -67,22 +69,21 @@ def mirror(
         print(f"* watermark: {watermark}")
     else:
         entries = {}
-        watermark = util.to_date(sickle.Identify().earliestDatestamp)
+        watermark = adapter.earliest_watermark()
         print("no index detected: starting a fresh mirror.")
-        print(f"* watermark: {watermark} (archive's earliest datestamp)")
+        print(f"* watermark: {watermark} (the source's earliest datestamp)")
 
-    # query all records updated since the watermark (inclusive, so the
-    # watermark day is re-fetched: upserts make the overlap harmless)
+    # query all records updated since the watermark; the batch pulled
+    # before the loop's machinery exists keeps the nothing-new run cheap
+    # (no index rewrite)
     print(f"querying all records updated since {watermark}...")
-    try:
-        records = sickle.ListRecords(
-            metadataPrefix="arXivRaw",
-            **{"from": util.to_datestamp(watermark)},
-        )
-    except NoRecordsMatch:
+    batches = adapter.fetch(watermark)
+    first_batch = next(batches, None)
+    if first_batch is None:
         print("no new records.")
         _record_harvest(
             paths,
+            source=adapter.source,
             t_start=run_start,
             counts={},
             watermark=watermark,
@@ -104,42 +105,32 @@ def mirror(
         disable=None,
     )
     totals = collections.Counter()
-    updater = mirror_store.Updater(mirror_dir)
-    last_request_time = time.time()
+    updater = mirror_store.Updater(mirror_dir, shard_fn=adapter.shard)
     completed = False   # reached the end of the query (vs interrupted/partial)
     try:
         for batch_number in (
             itertools.count(1) if num_batches is None
             else range(1, num_batches + 1)
         ):
-            # rate limit
-            next_request_time = last_request_time + 1/MAX_RPS + 0.5
-            wait_time = next_request_time - time.time()
-            if wait_time > 0:
-                time.sleep(wait_time)
-
-            # load a batch of records
-            batch = []
-            last_request_time = time.time()
-            for _, record in zip(range(BATCH_SIZE), records):
-                batch.append(record)
+            batch = first_batch if batch_number == 1 else next(batches, None)
+            if batch is None:
+                completed = True
+                break
             bar.update(len(batch))
 
             # apply the batch to the mirror and the in-memory index
             counts = collections.Counter()
             new_dates = []
             for record in batch:
-                try:
-                    parsed = arxivraw.parse_record(record.xml)
-                    status = _apply(parsed, entries, updater)
-                    watermark = max(watermark, parsed.datestamp)
-                except Exception as e:
+                if isinstance(record, Exception):
                     counts["error"] += 1
-                    bar.write(f"! error on record: {e!r}")
+                    bar.write(f"! error on record: {record!r}")
                     continue
+                status = _apply(record, entries, updater, adapter)
+                watermark = max(watermark, record.datestamp)
                 counts[status] += 1
                 if status == "new":
-                    new_dates.append(entries[parsed.xid].date)
+                    new_dates.append(entries[record.id].date)
             totals.update(counts)
 
             # report the batch
@@ -164,10 +155,6 @@ def mirror(
                 index.save_index(
                     path=index_path, watermark=watermark, entries=entries,
                 )
-
-            if len(batch) < BATCH_SIZE:
-                completed = True
-                break
     except KeyboardInterrupt:
         print("\nexiting query early.")
     except Exception as e:
@@ -189,6 +176,7 @@ def mirror(
         print(f"saved {len(entries)} entries; watermark {watermark}")
         _record_harvest(
             paths,
+            source=adapter.source,
             t_start=run_start,
             counts=dict(totals),
             watermark=watermark,
@@ -196,12 +184,11 @@ def mirror(
             completed=completed,
         )
 
-    print("done.")
-
 
 def _record_harvest(
-    paths,
+    paths: util.DataPaths,
     *,
+    source: str,
     t_start: str,
     counts: dict[str, int],
     watermark,
@@ -210,15 +197,17 @@ def _record_harvest(
 ) -> None:
     """
     Append one run's record to the harvest log (harvests.jsonl beside the
-    other data files): what the run applied ("counts", empty when there was
-    nothing new), the watermark it reached, the resulting mirror size
-    ("papers"), and whether it saw the query through to the end
-    ("completed" is False for interrupted and batch-limited runs). The
-    record's "t" stamp is the write time, i.e. when the run ended; "t_start"
-    is when it began. Written only after the index is saved, so the log
-    never describes state that didn't land on disk.
+    other data files): the source it harvested, what the run applied
+    ("counts", empty when there was nothing new), the watermark it
+    reached, the resulting mirror size ("papers"), and whether it saw the
+    query through to the end ("completed" is False for interrupted and
+    batch-limited runs). The record's "t" stamp is the write time, i.e.
+    when the run ended; "t_start" is when it began. Written only after
+    the index is saved, so the log never describes state that didn't land
+    on disk.
     """
     util.log_event(paths.harvests, {
+        "source": source,
         "t_start": t_start,
         "counts": counts,
         "watermark": util.to_datestamp(watermark),
@@ -228,23 +217,21 @@ def _record_harvest(
 
 
 def _apply(
-    parsed: arxivraw.ParsedRecord,
+    record: sources.Record,
     entries: dict[str, index.Entry],
     updater: mirror_store.Updater,
+    adapter,
 ) -> str:
     """
-    Apply one parsed OAI record to the mirror updater and the in-memory
+    Apply one fetched record to the mirror updater and the in-memory
     index entries. Returns "new", "updated", or "unchanged" for live
     records (per the mirror upsert), or "deleted" / "deleted-absent" for
-    records deleted upstream (per whether there was a paper to remove).
+    records deleted upstream (per whether there was a document to remove).
     """
-    if parsed.doc is None:
-        existed = updater.delete(parsed.xid)
-        entries.pop(parsed.xid, None)
+    if record.doc is None:
+        existed = updater.delete(record.id)
+        entries.pop(record.id, None)
         return "deleted" if existed else "deleted-absent"
-    status = updater.upsert(parsed.doc)
-    entries[parsed.xid] = index.Entry(
-        date=arxivraw.submitted_date(parsed.doc),
-        categories=tuple(parsed.doc.get("categories", ())),
-    )
+    status = updater.upsert(record.doc)
+    entries[record.id] = adapter.entry(record.doc)
     return status

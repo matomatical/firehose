@@ -6,6 +6,7 @@ import pytest
 
 from firehose import index
 from firehose import mirror
+from firehose import sources
 
 
 def _entries():
@@ -70,7 +71,9 @@ def _write_config(tmp_path):
 def test_rebuild_index_from_mirror(tmp_path):
     config_path = _write_config(tmp_path)
     mirror_dir = str(tmp_path / "data" / "mirror" / "arxiv")
-    updater = mirror.Updater(mirror_dir)
+    updater = mirror.Updater(
+        mirror_dir, shard_fn=sources.adapter("arxiv").shard,
+    )
     updater.upsert({
         "id": "2003.14184",
         "categories": ["math.PR", "cs.NA"],

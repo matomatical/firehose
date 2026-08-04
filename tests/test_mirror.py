@@ -1,10 +1,16 @@
-"""Tests for the month-archive metadata mirror."""
+"""Tests for the shard-archive metadata mirror."""
 
 import gzip
 import json
 import os
 
 from firehose import mirror
+from firehose import sources
+
+
+# the arXiv shard rule (submission month) stands in for "any pure function
+# of the id" throughout; the rule itself is tested with the adapter
+SHARD_FN = sources.adapter("arxiv").shard
 
 
 def _doc(xid, title="A Title"):
@@ -24,30 +30,27 @@ def _doc(xid, title="A Title"):
     }
 
 
-def test_shard_and_paths():
-    assert mirror.shard("2003.14184") == "2003"
-    assert mirror.shard("math/0211159") == "0211"
-    assert mirror.shard("math.GT/0309136") == "0309"
-    assert mirror.month_path("m", "2003") == "m/2003.jsonl.gz"
+def test_shard_path():
+    assert mirror.shard_path("m", "2003") == "m/2003.jsonl.gz"
 
 
-def test_save_load_month_roundtrip(tmp_path):
+def test_save_load_shard_roundtrip(tmp_path):
     mirror_dir = str(tmp_path)
     docs = {
         "2003.14184": _doc("2003.14184", title="Ünïcode Title"),
         "2003.00001": _doc("2003.00001"),
     }
-    mirror.save_month(mirror_dir, "2003", docs)
+    mirror.save_shard(mirror_dir, "2003", docs)
 
-    assert mirror.load_month(mirror_dir, "2003") == docs
-    assert mirror.load_month(mirror_dir, "1999") == {}
-    assert mirror.read_paper(mirror_dir, "2003.14184")["title"] == (
-        "Ünïcode Title"
-    )
-    assert mirror.read_paper(mirror_dir, "2003.99999") is None
+    assert mirror.load_shard(mirror_dir, "2003") == docs
+    assert mirror.load_shard(mirror_dir, "1999") == {}
+    assert mirror.read_paper(mirror_dir, "2003.14184", shard_fn=SHARD_FN)[
+        "title"
+    ] == "Ünïcode Title"
+    assert mirror.read_paper(mirror_dir, "2003.99999", shard_fn=SHARD_FN) is None
 
     # one line per doc, sorted by id, unicode stored raw (not escaped)
-    with gzip.open(mirror.month_path(mirror_dir, "2003"), "rt") as f:
+    with gzip.open(mirror.shard_path(mirror_dir, "2003"), "rt") as f:
         lines = f.read().splitlines()
     assert [json.loads(line)["id"] for line in lines] == [
         "2003.00001", "2003.14184",
@@ -55,42 +58,44 @@ def test_save_load_month_roundtrip(tmp_path):
     assert "Ünïcode" in lines[1]
 
 
-def test_save_month_bytes_are_deterministic(tmp_path):
+def test_save_shard_bytes_are_deterministic(tmp_path):
     # equal documents -> byte-identical archives, however arrived at (the
     # gzip timestamp is zeroed and lines are sorted by id)
     docs = {xid: _doc(xid) for xid in ["2003.14184", "2003.00001"]}
-    mirror.save_month(str(tmp_path), "2003", docs)
-    first = open(mirror.month_path(str(tmp_path), "2003"), "rb").read()
-    mirror.save_month(str(tmp_path), "2003", dict(reversed(docs.items())))
-    second = open(mirror.month_path(str(tmp_path), "2003"), "rb").read()
+    mirror.save_shard(str(tmp_path), "2003", docs)
+    first = open(mirror.shard_path(str(tmp_path), "2003"), "rb").read()
+    mirror.save_shard(str(tmp_path), "2003", dict(reversed(docs.items())))
+    second = open(mirror.shard_path(str(tmp_path), "2003"), "rb").read()
     assert first == second
 
 
-def test_save_month_empty_removes_archive(tmp_path):
+def test_save_shard_empty_removes_archive(tmp_path):
     mirror_dir = str(tmp_path)
-    mirror.save_month(mirror_dir, "2003", {"2003.00001": _doc("2003.00001")})
-    assert mirror.months(mirror_dir) == ["2003"]
-    mirror.save_month(mirror_dir, "2003", {})
-    assert mirror.months(mirror_dir) == []
-    mirror.save_month(mirror_dir, "2003", {})   # already absent: no error
+    mirror.save_shard(mirror_dir, "2003", {"2003.00001": _doc("2003.00001")})
+    assert mirror.shards(mirror_dir) == ["2003"]
+    mirror.save_shard(mirror_dir, "2003", {})
+    assert mirror.shards(mirror_dir) == []
+    mirror.save_shard(mirror_dir, "2003", {})   # already absent: no error
 
 
-def test_read_papers_groups_by_month(tmp_path):
+def test_read_papers_groups_by_shard(tmp_path):
     mirror_dir = str(tmp_path)
     xids = ["2003.14184", "math/0211159", "2003.00001"]
     for xid in xids:
-        updater = mirror.Updater(mirror_dir)
+        updater = mirror.Updater(mirror_dir, shard_fn=SHARD_FN)
         updater.upsert(_doc(xid))
         updater.flush()
 
-    found = mirror.read_papers(mirror_dir, xids + ["2003.99999"])
+    found = mirror.read_papers(
+        mirror_dir, xids + ["2003.99999"], shard_fn=SHARD_FN,
+    )
     assert set(found) == set(xids)
     assert found["math/0211159"]["id"] == "math/0211159"
 
 
 def test_iter_papers_sorted_with_no_temp_leftovers(tmp_path):
     mirror_dir = str(tmp_path)
-    updater = mirror.Updater(mirror_dir)
+    updater = mirror.Updater(mirror_dir, shard_fn=SHARD_FN)
     for xid in ["2003.14184", "math/0211159", "2003.00001"]:
         updater.upsert(_doc(xid))
     updater.flush()
@@ -108,40 +113,42 @@ def test_updater_upsert_delete_statuses(tmp_path):
     mirror_dir = str(tmp_path)
     doc = _doc("2003.14184")
 
-    updater = mirror.Updater(mirror_dir)
+    updater = mirror.Updater(mirror_dir, shard_fn=SHARD_FN)
     assert updater.upsert(doc) == "new"
     assert updater.upsert(doc) == "unchanged"
     revised = _doc("2003.14184", title="A New Title")
     assert updater.upsert(revised) == "updated"
     updater.flush()
-    assert mirror.read_paper(mirror_dir, "2003.14184")["title"] == (
-        "A New Title"
-    )
+    assert mirror.read_paper(mirror_dir, "2003.14184", shard_fn=SHARD_FN)[
+        "title"
+    ] == "A New Title"
 
     # a fresh updater sees the flushed state
-    updater = mirror.Updater(mirror_dir)
+    updater = mirror.Updater(mirror_dir, shard_fn=SHARD_FN)
     assert updater.upsert(revised) == "unchanged"
     assert updater.delete("2003.14184") is True
     assert updater.delete("2003.14184") is False
     updater.flush()
-    assert mirror.read_paper(mirror_dir, "2003.14184") is None
-    assert mirror.months(mirror_dir) == []   # emptied month archive removed
+    assert mirror.read_paper(
+        mirror_dir, "2003.14184", shard_fn=SHARD_FN,
+    ) is None
+    assert mirror.shards(mirror_dir) == []   # emptied shard archive removed
 
 
-def test_updater_flush_only_rewrites_dirty_months(tmp_path):
+def test_updater_flush_only_rewrites_dirty_shards(tmp_path):
     mirror_dir = str(tmp_path)
-    mirror.save_month(mirror_dir, "2003", {"2003.00001": _doc("2003.00001")})
-    untouched = os.stat(mirror.month_path(mirror_dir, "2003")).st_mtime_ns
+    mirror.save_shard(mirror_dir, "2003", {"2003.00001": _doc("2003.00001")})
+    untouched = os.stat(mirror.shard_path(mirror_dir, "2003")).st_mtime_ns
 
-    updater = mirror.Updater(mirror_dir)
+    updater = mirror.Updater(mirror_dir, shard_fn=SHARD_FN)
     assert updater.upsert(_doc("2003.00001")) == "unchanged"   # loads, no dirt
     updater.upsert(_doc("2004.00001"))
     updater.flush()
 
-    assert os.stat(mirror.month_path(mirror_dir, "2003")).st_mtime_ns == (
+    assert os.stat(mirror.shard_path(mirror_dir, "2003")).st_mtime_ns == (
         untouched
     )
-    assert mirror.months(mirror_dir) == ["2003", "2004"]
+    assert mirror.shards(mirror_dir) == ["2003", "2004"]
 
 
 def test_serialisation_is_deterministic():

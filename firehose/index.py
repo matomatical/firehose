@@ -108,16 +108,18 @@ def save_index(
 def rebuild_index(
     config_path: str = util.CONFIG_PATH,
     data_dir: str | None = None,
+    source: str = "arxiv",
 ):
     """
-    Regenerate the index from the metadata mirror by a full scan.
+    Regenerate a source's index from its metadata mirror by a full scan.
     """
-    from firehose import arxivraw
+    from firehose import sources
 
+    adapter = sources.adapter(source)
     config = util.load_config(config_path)
     paths = util.data_paths(config, data_dir=data_dir)
-    mirror_dir = paths.mirror("arxiv")
-    index_path = paths.index("arxiv")
+    mirror_dir = paths.mirror(adapter.source)
+    index_path = paths.index(adapter.source)
     if not os.path.isdir(mirror_dir):
         raise SystemExit(f"no mirror at {mirror_dir}; run `firehose mirror`")
 
@@ -126,11 +128,8 @@ def rebuild_index(
     watermark = None
     documents = mirror.iter_papers(mirror_dir)
     for doc in tqdm.tqdm(documents, ncols=80, disable=None):
-        entries[doc["id"]] = Entry(
-            date=arxivraw.submitted_date(doc),
-            categories=tuple(doc.get("categories", ())),
-        )
-        datestamp = datetime.date.fromisoformat(doc["oai_datestamp"])
+        entries[doc["id"]] = adapter.entry(doc)
+        datestamp = adapter.datestamp(doc)
         if watermark is None or datestamp > watermark:
             watermark = datestamp
     if watermark is None:

@@ -34,15 +34,16 @@ import httpx
 
 from firehose import index
 from firehose import mirror
+from firehose import sources
 from firehose import stats
 from firehose import util
 from firehose.paper import Paper
 
 
 # The sole source so far: the per-source data files (mirror shards, index)
-# are addressed by source name, and every paper is arXiv's until further
-# source adapters land.
-ARXIV = "arxiv"
+# are addressed by the adapter's name, and every paper is arXiv's until
+# further source adapters land.
+ARXIV = sources.adapter("arxiv")
 
 
 def make_store(config: dict, data_dir: str | None = None):
@@ -127,7 +128,7 @@ class LocalStore:
         retained."""
         if self._lazy_dates is None:
             print("loading index...")
-            entries, _ = index.load_index(self._paths.index(ARXIV))
+            entries, _ = index.load_index(self._paths.index(ARXIV.source))
             self._lazy_dates = {
                 xid: entry.date
                 for xid, entry in entries.items()
@@ -168,18 +169,22 @@ class LocalStore:
             rng=rng,
         )
         docs = mirror.read_papers(
-            self._paths.mirror(ARXIV), [xid for xid, _date in selected],
+            self._paths.mirror(ARXIV.source),
+            [xid for xid, _date in selected],
+            shard_fn=ARXIV.shard,
         )
         return [
-            Paper.from_mirror_doc(docs[xid])
+            ARXIV.to_paper(docs[xid])
             for xid, _date in selected
             if xid in docs
         ]
 
     def get_paper(self, xid: str) -> Paper | None:
         """One paper's metadata, any category; None if not mirrored."""
-        doc = mirror.read_paper(self._paths.mirror(ARXIV), xid)
-        return Paper.from_mirror_doc(doc) if doc is not None else None
+        doc = mirror.read_paper(
+            self._paths.mirror(ARXIV.source), xid, shard_fn=ARXIV.shard,
+        )
+        return ARXIV.to_paper(doc) if doc is not None else None
 
     # # #
     # Events
@@ -249,7 +254,7 @@ class LocalStore:
         self.refresh_events()
         try:
             watermark = index.load_watermark(
-                self._paths.index(ARXIV),
+                self._paths.index(ARXIV.source),
             ).isoformat()
             subscribed_papers = len(self._dates)
         except FileNotFoundError:
@@ -386,7 +391,7 @@ class RemoteStore:
             offset=offset,
             cutoff=cutoff.isoformat() if cutoff is not None else None,
         )
-        return [Paper.from_mirror_doc(doc) for doc in docs]
+        return [ARXIV.to_paper(doc) for doc in docs]
 
     def get_paper(self, xid: str) -> Paper | None:
         """One paper's metadata, any category; None if not mirrored."""
@@ -397,7 +402,7 @@ class RemoteStore:
         if response.status_code == 404:
             return None
         response.raise_for_status()
-        return Paper.from_mirror_doc(response.json())
+        return ARXIV.to_paper(response.json())
 
     # # #
     # Events
