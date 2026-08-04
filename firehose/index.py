@@ -33,12 +33,21 @@ class Entry(NamedTuple):
     categories: tuple[str, ...]
 
 
+def _parse_watermark(line: str) -> datetime.date:
+    """The watermark date from the index's first line."""
+    return datetime.date.fromisoformat(line.strip().split(": ")[-1])
+
+
+def load_watermark(path: str) -> datetime.date:
+    """Read just the watermark from the index, without loading the entries."""
+    with open(path, encoding="utf-8") as f:
+        return _parse_watermark(next(f))
+
+
 def load_index(path: str) -> tuple[dict[str, Entry], datetime.date]:
     """Load the {id: Entry} index plus the watermark from the first line."""
     with open(path, encoding="utf-8") as f:
-        watermark = datetime.date.fromisoformat(
-            next(f).strip().split(": ")[-1]
-        )
+        watermark = _parse_watermark(next(f))
         lines = f.read().splitlines()
     entries = {}
     current_date = None

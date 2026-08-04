@@ -34,6 +34,16 @@ def test_save_load_roundtrip(tmp_path):
     assert loaded_watermark == watermark
 
 
+def test_load_watermark_reads_only_the_header(tmp_path):
+    path = str(tmp_path / "index.txt")
+    index.save_index(
+        path=path,
+        watermark=datetime.date(2026, 8, 1),
+        entries=_entries(),
+    )
+    assert index.load_watermark(path) == datetime.date(2026, 8, 1)
+
+
 def test_file_format_is_grouped_and_sorted(tmp_path):
     path = str(tmp_path / "index.txt")
     index.save_index(

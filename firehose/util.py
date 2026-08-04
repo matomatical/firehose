@@ -76,6 +76,8 @@ def data_paths(
         events=os.path.join(data_dir, "events.jsonl"),
         mirror=os.path.join(data_dir, "metadata"),
         index=os.path.join(data_dir, "index.txt"),
+        harvests=os.path.join(data_dir, "harvests.jsonl"),
+        unsent=os.path.join(data_dir, "unsent-events.jsonl"),
     )
 
 
@@ -148,10 +150,12 @@ def _parse_dated_lines(lines):
 # Event logging utilities
 
 
-def log_event(path: str, event: dict) -> None:
+def log_event(path: str, event: dict) -> int:
     """
-    Append one event as a JSON line to the event log at `path`, stamped with the
-    current local time under the key "t".
+    Append one event as a JSON line to the event log at `path`. An event
+    without a "t" timestamp is stamped with the current local time; one that
+    already carries a "t" (recorded earlier, written now) keeps it. Returns
+    the size of the log after the append, for readers that tail the file.
     """
     record = {"t": datetime.datetime.now().isoformat(), **event}
     parent = os.path.dirname(path)
@@ -159,6 +163,7 @@ def log_event(path: str, event: dict) -> None:
         os.makedirs(parent, exist_ok=True)
     with open(path, "a") as f:
         f.write(json.dumps(record) + "\n")
+        return f.tell()
 
 
 def load_events(path: str) -> list[dict]:

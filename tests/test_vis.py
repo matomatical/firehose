@@ -5,8 +5,8 @@ dir. This guards the path-resolution wiring (config -> data_paths -> store)
 -- the class of regression a util rename/removal silently introduces in an
 entry point that the pure-helper unit tests never call.
 
-Plus unit tests for the renderers (render_scan_time, _scan_time_legend). The
-data-shaping these render is covered in test_stats.py.
+Plus unit tests for the renderers (render_scan_time, _scan_time_legend,
+render_status). The data-shaping these render is covered in test_stats.py.
 """
 import datetime
 import json
@@ -109,6 +109,78 @@ def test_scan_time_notes_untimed_imported_reads(tmp_path, capsys):
         heatmap=False,
     )
     assert "skipping 1 papers without timing data" in capsys.readouterr().out
+
+
+def test_render_status_remote_snapshot():
+    out = vis.render_status({
+        "url": "http://nook:8377",
+        "server_started": "2026-08-04T04:07:12.123456",
+        "data_dir": "/srv/firehose/data",
+        "watermark": "2026-08-04",
+        "subscribed_papers": 910000,
+        "seen_papers": 133200,
+        "events": 133842,
+        "last_event": {
+            "t": "2026-08-04T09:12:33.500000",
+            "type": "view",
+            "xid": "2508.01234",
+        },
+        "harvests": [
+            {
+                "t": "2026-08-03T04:06:48.900000",
+                "t_start": "2026-08-03T04:00:01.000000",
+                "counts": {"new": 900, "updated": 3},
+                "watermark": "2026-08-03", "papers": 3130000,
+                "completed": False,
+            },
+            {
+                "t": "2026-08-04T04:07:12.900000",
+                "t_start": "2026-08-04T04:00:01.000000",
+                "counts": {"new": 1204, "updated": 33},
+                "watermark": "2026-08-04", "papers": 3130412,
+                "completed": True,
+            },
+        ],
+    })
+    assert "server: http://nook:8377 (running since 2026-08-04T04:07:12)" in out
+    assert "mirror: watermark 2026-08-04, 3,130,412 papers" in out
+    assert "subscribed: 910,000 papers, 133,200 seen" in out
+    assert "events: 133,842, last view 2508.01234 at 2026-08-04T09:12:33" in out
+    assert (
+        "* 2026-08-04T04:00:01 .. 2026-08-04T04:07:12:"
+        " new: 1204, updated: 33"
+    ) in out
+    # the interrupted run is marked
+    assert "new: 900, updated: 3 [partial]" in out
+
+
+def test_render_status_empty_local_data_dir():
+    out = vis.render_status({
+        "data_dir": "/tmp/fresh",
+        "watermark": None,
+        "subscribed_papers": None,
+        "seen_papers": 0,
+        "events": 0,
+        "last_event": None,
+        "harvests": [],
+    })
+    assert "data: /tmp/fresh" in out
+    assert "mirror: no index" in out
+    assert "events: 0" in out
+    assert "recent harvests: none recorded" in out
+
+
+def test_status_entry_point_runs_against_tmp_store(tmp_path, capsys):
+    config_path = _config(tmp_path)
+    make_data_dir(tmp_path, [make_doc("2601.00001", date="2026-01-01")])
+
+    vis.status(config_path=config_path, data_dir=str(tmp_path))
+
+    out = capsys.readouterr().out
+    assert f"data: {tmp_path}" in out
+    assert "mirror: watermark 2026-01-01" in out
+    assert "subscribed: 1 papers, 0 seen" in out
+    assert "recent harvests: none recorded" in out
 
 
 def test_unread_entry_point_runs_against_tmp_data(tmp_path, capsys):

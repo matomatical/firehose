@@ -4,9 +4,9 @@ through a Store, so the commands above it (scanning, visualisation) never
 touch the files directly.
 
 A Store answers a small set of queries — select papers to scan (with full
-metadata), fetch one paper, record scan events, and serve the pre-shaped
-reading-state data the visualisation commands consume — and hides where the
-answers come from. There are two implementations, chosen by `make_store`
+metadata), fetch one paper, record scan events, report a status snapshot,
+and serve the pre-shaped reading-state data the visualisation commands
+consume — and hides where the answers come from. There are two implementations, chosen by `make_store`
 from the config: `LocalStore` answers from the data directory in-process —
 the mirror (per-paper metadata), the index (id, submission date, categories
 per paper, loaded into memory), and the event log (the append-only record
@@ -25,8 +25,10 @@ import contextlib
 import datetime
 import json
 import os
+import queue
 import random
 import threading
+import time
 
 import httpx
 
@@ -46,7 +48,7 @@ def make_store(config: dict, data_dir: str | None = None):
     """
     url = config.get("server", {}).get("url")
     if url and data_dir is None:
-        return RemoteStore(url)
+        return RemoteStore(url, spool_path=util.data_paths(config).unsent)
     paths = util.data_paths(config, data_dir=data_dir)
     return LocalStore(paths, subscribed=util.subscribed_categories(config))
 
@@ -186,7 +188,9 @@ class LocalStore:
         for event in events:
             if "t" not in event:
                 event = {"t": datetime.datetime.now().isoformat(), **event}
-            util.log_event(self._paths.events, event)
+            # advance the tail offset past our own append: it is already
+            # folded, so refresh_events must not read it back as news
+            self._events_offset = util.log_event(self._paths.events, event)
             self._fold_event(
                 event, datetime.date.fromisoformat(event["t"][:10]),
             )
@@ -218,6 +222,40 @@ class LocalStore:
         self._events.append(event)
         if event.get("type") in ("view", "read-import"):
             self._seen.setdefault(event["xid"], date)
+
+    def close(self) -> None:
+        """Nothing to settle: record_events writes synchronously."""
+        pass
+
+    # # #
+    # Status
+
+    def status(self) -> dict:
+        """
+        A JSON-clean snapshot of this store's data: the most recent harvest
+        records (the tail of the harvest log the `mirror` command appends
+        to), the index watermark and subscribed paper count, and the event
+        log's size, seen-count, and last event. The logs are (re)read at
+        call time, so a long-running process reports harvests and events
+        that landed after it started. On a data directory with no index
+        yet, the index-derived fields are None.
+        """
+        self.refresh_events()
+        try:
+            watermark = index.load_watermark(self._paths.index).isoformat()
+            subscribed_papers = len(self._dates)
+        except FileNotFoundError:
+            watermark = None
+            subscribed_papers = None
+        return {
+            "data_dir": self._paths.data_dir,
+            "watermark": watermark,
+            "subscribed_papers": subscribed_papers,
+            "seen_papers": len(self._seen),
+            "events": len(self._events),
+            "last_event": self._events[-1] if self._events else None,
+            "harvests": util.load_events(self._paths.harvests)[-10:],
+        }
 
     # # #
     # Reading-state queries (pre-shaped for the visualisation commands)
@@ -256,19 +294,50 @@ class LocalStore:
         return list(self._events)
 
 
+# Pauses before each successive attempt to post an event batch: the first
+# try is immediate, and a batch that exhausts every attempt is spooled.
+EVENT_RETRY_WAITS = (0.0, 1.0, 5.0)
+
+# How long `close` waits for the background sender to drain the event queue
+# before giving up and spooling what remains.
+EVENT_CLOSE_TIMEOUT = 60.0
+
+# Queued behind the last event by `close` to tell the sender to finish up.
+_CLOSE_SENTINEL = object()
+
+
 class RemoteStore:
     """
     A Store over HTTP: a thin client of a firehose server (`firehose
-    serve`), one request per query. Event timestamps are stamped here, with
-    this machine's clock, before posting. Queries are always as fresh as
-    the server, so `refresh_events` has nothing to do.
+    serve`), one request per query. Queries are always as fresh as the
+    server, so `refresh_events` has nothing to do.
+
+    Event posting is asynchronous: `record_events` stamps timestamps with
+    this machine's clock and queues the events for a background sender
+    thread, so the caller (the scanning TUI) never waits on the network.
+    Call `close` when recording is finished — it drains the queue, and
+    events that could not be delivered (server down, retries exhausted)
+    are appended to the spool file at `spool_path` for later replay
+    rather than lost.
     """
 
-    def __init__(self, url: str, client: httpx.Client | None = None):
+    def __init__(
+        self,
+        url: str,
+        client: httpx.Client | None = None,
+        *,
+        spool_path: str = "unsent-events.jsonl",
+        retry_waits: tuple[float, ...] = EVENT_RETRY_WAITS,
+    ):
         self._url = url
         self._client = client or httpx.Client(
             base_url=url, timeout=30.0, follow_redirects=True,
         )
+        self._spool_path = spool_path
+        self._retry_waits = retry_waits
+        self._queue: queue.SimpleQueue = queue.SimpleQueue()
+        self._sender: threading.Thread | None = None
+        self._failed: list[dict] = []   # batches whose retries ran out
 
     def _get(self, path: str, **params):
         with _notice_if_slow(f"waiting on the server ({self._url}{path})..."):
@@ -326,17 +395,107 @@ class RemoteStore:
     # Events
 
     def record_events(self, events: list[dict]) -> None:
-        """Post events to the server, stamped with this machine's clock."""
+        """
+        Stamp events with this machine's clock (the moment of the action,
+        which the dwell analytics depend on) and queue them for the
+        background sender; returns immediately. Delivery is settled by
+        `close`.
+        """
         now = datetime.datetime.now().isoformat()
-        stamped = [
-            event if "t" in event else {"t": now, **event}
-            for event in events
-        ]
-        response = self._client.post("/events", json=stamped)
-        response.raise_for_status()
+        for event in events:
+            if "t" not in event:
+                event = {"t": now, **event}
+            self._queue.put(event)
+        if self._sender is None:
+            self._sender = threading.Thread(target=self._send_loop, daemon=True)
+            self._sender.start()
+
+    def _send_loop(self) -> None:
+        """
+        Deliver queued events until the close sentinel arrives. Each pass
+        posts everything currently queued as one batch, so events that
+        accumulate while a request is in flight coalesce into a single
+        request (and the one-at-a-time passes preserve event order). A
+        batch whose retries run out is parked for `close` to spool, and
+        delivery continues with the next batch.
+        """
+        while True:
+            item = self._queue.get()
+            closing = item is _CLOSE_SENTINEL
+            batch = [] if closing else [item]
+            while not closing:
+                try:
+                    item = self._queue.get_nowait()
+                except queue.Empty:
+                    break
+                if item is _CLOSE_SENTINEL:
+                    closing = True
+                else:
+                    batch.append(item)
+            if batch:
+                self._post_events(batch)
+            if closing:
+                return
+
+    def _post_events(self, batch: list[dict]) -> None:
+        """Post one batch, retrying on any HTTP-layer failure; a batch that
+        exhausts every attempt lands in the failed list instead."""
+        for wait in self._retry_waits:
+            time.sleep(wait)
+            try:
+                response = self._client.post("/events", json=batch)
+                response.raise_for_status()
+                return
+            except httpx.HTTPError:
+                continue
+        self._failed.extend(batch)
+
+    def close(self) -> None:
+        """
+        Settle event delivery: wait (bounded) for the sender to drain the
+        queue, then append anything undelivered to the spool file, with a
+        printed notice. Safe to call when nothing was recorded, and a
+        later record_events starts a fresh sender.
+        """
+        if self._sender is None:
+            return
+        self._queue.put(_CLOSE_SENTINEL)
+        with _notice_if_slow("delivering remaining events to the server..."):
+            self._sender.join(timeout=EVENT_CLOSE_TIMEOUT)
+        if self._sender.is_alive():
+            print(
+                "warning: gave up waiting on the server; "
+                "an in-flight batch of events may be lost"
+            )
+        self._sender = None
+        # spool the given-up batches, plus anything the sender never took
+        # (it timed out above, or died on an unexpected error)
+        undelivered = self._failed
+        self._failed = []
+        while True:
+            try:
+                item = self._queue.get_nowait()
+            except queue.Empty:
+                break
+            if item is not _CLOSE_SENTINEL:
+                undelivered.append(item)
+        if undelivered:
+            for event in undelivered:
+                util.log_event(self._spool_path, event)
+            print(
+                f"warning: {len(undelivered)} events were not delivered to "
+                f"the server; saved to {self._spool_path} for later replay"
+            )
 
     def refresh_events(self) -> None:
         pass
+
+    # # #
+    # Status
+
+    def status(self) -> dict:
+        """The server's status snapshot, plus the URL it answered on."""
+        return {"url": self._url, **self._get("/status")}
 
     # # #
     # Reading-state queries (pre-shaped for the visualisation commands)
@@ -377,9 +536,10 @@ def _notice_if_slow(message: str, delay: float = 1.0):
     """
     Print `message` if the wrapped block is still running after `delay`
     seconds — so a slow or hung server is visible rather than a silent
-    stall. A block that finishes promptly prints nothing. Applied to the
-    read queries but not event posting, which runs while the scanning TUI
-    owns the screen.
+    stall. A block that finishes promptly prints nothing. Applied where a
+    request blocks a caller who owns the terminal (the read queries, the
+    final drain in `close`) — never on the background event sender, which
+    must stay silent while the scanning TUI owns the screen.
     """
     timer = threading.Timer(delay, print, args=(message,))
     timer.daemon = True

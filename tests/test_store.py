@@ -229,11 +229,89 @@ def test_refresh_events_tails_the_log(tmp_path):
     assert len(store.scan_events()) == 2
 
 
+def test_refresh_events_does_not_refold_own_recordings(tmp_path):
+    # record_events folds as it writes, so a later refresh (e.g. the one in
+    # status) must not read the store's own appends back as news
+    make_data_dir(tmp_path, [make_doc("2601.00001")])
+    store = make_store(tmp_path)
+
+    store.record_events([{"type": "view", "xid": "2601.00001"}])
+    store.refresh_events()
+
+    assert len(store.scan_events()) == 1
+
+
 def test_store_tolerates_missing_event_log(tmp_path):
     make_data_dir(tmp_path, [make_doc("2601.00001")])
     store = make_store(tmp_path)
     assert store.scan_events() == []
     assert store.read_ids() == set()
+
+
+# -- LocalStore: status snapshot --------------------------------------------------
+
+def test_status_reports_store_state(tmp_path):
+    make_data_dir(
+        tmp_path,
+        [
+            make_doc("2601.00001", date="2026-01-01"),
+            make_doc("2601.00002", date="2026-01-02"),
+        ],
+        events=[
+            {"t": "2026-01-03T10:00:00", "type": "view", "xid": "2601.00001"},
+        ],
+    )
+    harvest_records = [
+        {
+            "t": "2026-01-02T04:05:00", "t_start": "2026-01-02T04:00:00",
+            "counts": {"new": 2}, "watermark": "2026-01-02", "papers": 2,
+            "completed": True,
+        },
+    ]
+    with open(tmp_path / "harvests.jsonl", "w") as f:
+        for record in harvest_records:
+            f.write(json.dumps(record) + "\n")
+    store = make_store(tmp_path)
+
+    status = store.status()
+
+    assert status["data_dir"] == str(tmp_path)
+    assert status["watermark"] == "2026-01-02"
+    assert status["subscribed_papers"] == 2
+    assert status["seen_papers"] == 1
+    assert status["events"] == 1
+    assert status["last_event"]["xid"] == "2601.00001"
+    assert status["harvests"] == harvest_records
+    assert json.dumps(status)   # JSON-clean, as served over HTTP
+    store.close()               # part of the interface; a no-op locally
+
+
+def test_status_rereads_the_logs(tmp_path):
+    make_data_dir(tmp_path, [make_doc("2601.00001")])
+    store = make_store(tmp_path)
+    assert store.status()["events"] == 0
+
+    # another writer appends after the store loaded the log
+    with open(tmp_path / "events.jsonl", "a") as f:
+        f.write(json.dumps(
+            {"t": "2026-01-03T10:00:00", "type": "view", "xid": "2601.00001"}
+        ) + "\n")
+
+    assert store.status()["events"] == 1
+
+
+def test_status_on_empty_data_dir(tmp_path):
+    make_data_dir(tmp_path, [])
+    store = make_store(tmp_path)
+
+    status = store.status()
+
+    assert status["watermark"] is None
+    assert status["subscribed_papers"] is None
+    assert status["seen_papers"] == 0
+    assert status["events"] == 0
+    assert status["last_event"] is None
+    assert status["harvests"] == []
 
 
 # -- LocalStore: reading-state queries -------------------------------------------

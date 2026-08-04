@@ -8,6 +8,7 @@ client -> wire -> server -> store contract both ways.
 import datetime
 import json
 
+import httpx
 from fastapi.testclient import TestClient
 
 from conftest import make_data_dir, make_doc, make_store
@@ -17,7 +18,11 @@ from firehose.store import RemoteStore
 
 def make_remote(tmp_path) -> RemoteStore:
     app = create_app(make_store(tmp_path))
-    return RemoteStore("http://testserver", client=TestClient(app))
+    return RemoteStore(
+        "http://testserver",
+        client=TestClient(app),
+        spool_path=str(tmp_path / "unsent-events.jsonl"),
+    )
 
 
 def test_select_papers_round_trip(tmp_path):
@@ -78,6 +83,7 @@ def test_record_events_round_trip(tmp_path):
 
     remote.record_events([{"type": "start", "n": 1}])
     remote.record_events([{"type": "view", "xid": "2601.00001"}])
+    remote.close()   # recording is asynchronous; close settles delivery
 
     # the view lands in the server's seen-set and on its disk, stamped
     # with the client's timestamp
@@ -116,6 +122,97 @@ def test_reading_state_queries_round_trip(tmp_path):
         {"t": "2026-01-03", "type": "read-import", "xid": "2601.00001"},
     ]
     remote.refresh_events()   # a no-op, but part of the interface
+
+
+def test_event_order_survives_asynchronous_delivery(tmp_path):
+    make_data_dir(tmp_path, [make_doc("2601.00001"), make_doc("2601.00002")])
+    remote = make_remote(tmp_path)
+
+    remote.record_events([{"type": "start", "n": 2}])
+    remote.record_events([{"type": "view", "xid": "2601.00001"}])
+    remote.record_events([{"type": "view", "xid": "2601.00002"}])
+    remote.record_events([{"type": "end"}])
+    remote.close()
+
+    events = [
+        json.loads(line)
+        for line in (tmp_path / "events.jsonl").read_text().splitlines()
+    ]
+    assert [e.get("xid", e["type"]) for e in events] == [
+        "start", "2601.00001", "2601.00002", "end",
+    ]
+
+
+def _failing_remote(tmp_path, handler, retry_waits) -> RemoteStore:
+    """A RemoteStore whose transport is `handler`, spooling into tmp_path."""
+    client = httpx.Client(
+        transport=httpx.MockTransport(handler), base_url="http://testserver",
+    )
+    return RemoteStore(
+        "http://testserver",
+        client=client,
+        spool_path=str(tmp_path / "unsent-events.jsonl"),
+        retry_waits=retry_waits,
+    )
+
+
+def test_event_posting_retries_transient_failures(tmp_path, capsys):
+    posts = []
+
+    def handler(request):
+        posts.append(request)
+        if len(posts) == 1:
+            raise httpx.ConnectError("transient blip")
+        return httpx.Response(200, json={"recorded": 1})
+
+    remote = _failing_remote(tmp_path, handler, retry_waits=(0.0, 0.0))
+    remote.record_events([{"type": "view", "xid": "2601.00001"}])
+    remote.close()
+
+    assert len(posts) == 2   # first attempt failed, retry delivered
+    assert not (tmp_path / "unsent-events.jsonl").exists()
+    assert "warning" not in capsys.readouterr().out
+
+
+def test_undeliverable_events_spool_with_a_notice(tmp_path, capsys):
+    def handler(request):
+        raise httpx.ConnectError("server down")
+
+    remote = _failing_remote(tmp_path, handler, retry_waits=(0.0,))
+    remote.record_events([{"type": "start", "n": 1}])
+    remote.record_events([{"type": "view", "xid": "2601.00001"}])
+    remote.close()
+
+    spool_path = tmp_path / "unsent-events.jsonl"
+    events = [
+        json.loads(line) for line in spool_path.read_text().splitlines()
+    ]
+    assert [e["type"] for e in events] == ["start", "view"]
+    assert all("t" in e for e in events)   # stamped at recording time
+    out = capsys.readouterr().out
+    assert "2 events were not delivered" in out
+    assert str(spool_path) in out
+
+
+def test_status_round_trip(tmp_path):
+    make_data_dir(
+        tmp_path,
+        [make_doc("2601.00001", date="2026-01-01")],
+        events=[
+            {"t": "2026-01-03T10:00:00", "type": "view", "xid": "2601.00001"},
+        ],
+    )
+    remote = make_remote(tmp_path)
+
+    status = remote.status()
+
+    assert status["url"] == "http://testserver"
+    assert "server_started" in status
+    assert status["watermark"] == "2026-01-01"
+    assert status["subscribed_papers"] == 1
+    assert status["seen_papers"] == 1
+    assert status["events"] == 1
+    assert status["harvests"] == []   # no harvest log on this data dir
 
 
 def test_notice_if_slow_prints_only_when_slow(capsys):

@@ -275,8 +275,9 @@ your scanning habits and taste for papers.
 HTTP. Point another machine's `server.url` config at it and every firehose
 command there — scanning, calendars, the lot — runs against the server's
 data with no local mirror at all: selection happens server-side, events post
-back synchronously, and client startup is instant since the index lives in
-the server's memory.
+back in the background (so scanning never waits on the network; anything
+undeliverable is saved to `data/unsent-events.jsonl` and reported), and
+client startup is instant since the index lives in the server's memory.
 
 This is how I run firehose day to day: the mirror and harvesting live on an
 always-on mini PC, and my laptop scans against it over a
@@ -287,6 +288,14 @@ always-on mini PC, and my laptop scans against it over a
   localhost. Never a public interface.
 * The server loads the index once at startup; restart it after a `mirror`
   run so it sees new papers.
+
+### `status`: check on the mirror
+
+`firehose status` prints a snapshot of the store: the mirror's watermark and
+size, subscribed and seen paper counts, the event log's tail, and the recent
+harvest runs (each `mirror` run appends what it did to `data/harvests.jsonl`).
+In remote mode the snapshot is the server's, so it answers "when did the
+mirror last catch up with arXiv?" from any machine.
 
 ### `classes`: list arXiv categories
 
@@ -356,6 +365,9 @@ and hand-editable:
 * **`events.jsonl`**: an append-only event log, one JSON object per line
   (`{"t": ..., "type": "view"|"save"|"download"|..., "xid": ...}`), recording
   each scanning session. This is the canonical record of your reading.
+* **`harvests.jsonl`**: an operational log of `mirror` runs, one line per run
+  (when it ran, what it applied, the watermark it reached). This is what
+  `status` reads back; unlike the event log it's disposable.
 
 `data/` is gitignored by default, so your reading history never lands in the
 code repo, and it's created automatically on first run.

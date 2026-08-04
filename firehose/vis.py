@@ -238,6 +238,22 @@ def scan_time(
             vis.saveimg(save_as)
 
 
+def status(
+    config_path: str = util.CONFIG_PATH,
+    data_dir: str | None = None,
+):
+    """
+    Report the state of the store: mirror size and watermark, recent
+    harvest runs, and the event log. In remote mode the snapshot is the
+    server's, so this shows when the server's mirror last caught up with
+    arXiv (and when the server last restarted, i.e. how fresh its
+    in-memory index is).
+    """
+    config = util.load_config(config_path)
+    store = _store(config, data_dir)
+    print(render_status(store.status()))
+
+
 def _scan_time_legend(max_seconds: float) -> mp.plot:
     """
     Colour key for the calendar heatmap: the `cyber` gradient tints each day
@@ -400,5 +416,64 @@ def render_scan_time(summary: stats.ScanTimeSummary) -> str:
         summary.seconds, summary.seconds_per_paper,
     ))
     return "\n".join(lines)
+
+
+# # #
+# Status rendering (the snapshot itself comes from Store.status)
+
+
+def render_status(status: dict) -> str:
+    """Format a store status snapshot (see Store.status) as plain text."""
+    lines = []
+    if "url" in status:
+        line = f"server: {status['url']}"
+        if status.get("server_started"):
+            line += f" (running since {status['server_started'][:19]})"
+        lines.append(line)
+    else:
+        lines.append(f"data: {status['data_dir']}")
+    harvests = status.get("harvests", [])
+    watermark = status["watermark"]
+    if watermark is None:
+        lines.append("mirror: no index (run `firehose mirror`)")
+    else:
+        line = f"mirror: watermark {watermark}"
+        if harvests:
+            line += f", {harvests[-1]['papers']:,} papers"
+        lines.append(line)
+    if status["subscribed_papers"] is not None:
+        lines.append(
+            f"subscribed: {status['subscribed_papers']:,} papers, "
+            f"{status['seen_papers']:,} seen"
+        )
+    line = f"events: {status['events']:,}"
+    last = status.get("last_event")
+    if last is not None:
+        label = last.get("type", "?")
+        if "xid" in last:
+            label += f" {last['xid']}"
+        line += f", last {label} at {last['t'][:19]}"
+    lines.append(line)
+    if harvests:
+        lines.append("recent harvests:")
+        lines.extend(_render_harvest(record) for record in harvests)
+    else:
+        lines.append("recent harvests: none recorded")
+    return "\n".join(lines)
+
+
+def _render_harvest(record: dict) -> str:
+    """One harvest-log record as a bullet line: when it ran, what it
+    applied (in the harvester's own count style), and whether it was cut
+    short of the end of its query."""
+    counts = record.get("counts", {})
+    summary = ", ".join(
+        f"{key}: {count}" for key, count in sorted(counts.items())
+    ) or "no new records"
+    partial = "" if record.get("completed") else " [partial]"
+    return (
+        f"* {record['t_start'][:19]} .. {record['t'][:19]}:"
+        f" {summary}{partial}"
+    )
 
 

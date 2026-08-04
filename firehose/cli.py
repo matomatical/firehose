@@ -15,6 +15,8 @@ def cli():
         'rebuild-index': firehose.index.rebuild_index,
         # serve this machine's data to remote firehose clients
         'serve': firehose.server.serve,
+        # report the store's state (mirror, harvests, event log)
+        'status': firehose.vis.status,
         # sample
         'sample': firehose.sample.sample,
         # print arXiv category catalog

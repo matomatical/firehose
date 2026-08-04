@@ -4,7 +4,7 @@ other machines can scan and visualise against this machine's data.
 
 The API mirrors the Store interface one-to-one (a RemoteStore is a thin
 client of it): selection with full metadata, single-paper lookup, event
-ingest, and the pre-shaped reading-state queries. Papers travel as mirror
+ingest, a status snapshot, and the pre-shaped reading-state queries. Papers travel as mirror
 documents (the client rebuilds Paper objects); dates travel as ISO strings.
 Event timestamps are client-generated: ingest preserves any "t" already on
 an event and stamps only bare ones.
@@ -62,6 +62,14 @@ def create_app(store: LocalStore) -> FastAPI:
         batch = await request.json()
         store.record_events(batch)
         return {"recorded": len(batch)}
+
+    # the app's creation time: with the index loaded once at startup, this
+    # tells a client how stale the in-memory view could be
+    started = datetime.datetime.now().isoformat()
+
+    @app.get("/status")
+    def status() -> dict:
+        return {"server_started": started, **store.status()}
 
     @app.get("/stats/submitted-dates")
     def submitted_dates() -> list[str]:

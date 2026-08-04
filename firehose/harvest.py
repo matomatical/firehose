@@ -1,4 +1,5 @@
 import collections
+import datetime
 import itertools
 import os
 import time
@@ -46,6 +47,7 @@ def mirror(
     util.ensure_data_dir(paths)
     os.makedirs(paths.mirror, exist_ok=True)
     _load_sickle()
+    run_start = datetime.datetime.now().isoformat()
 
     # configure client; retries ride out transient 503s (the server sets
     # Retry-After) so long unattended runs survive them. The generous read
@@ -76,6 +78,14 @@ def mirror(
         )
     except NoRecordsMatch:
         print("no new records.")
+        _record_harvest(
+            paths,
+            t_start=run_start,
+            counts={},
+            watermark=watermark,
+            papers=len(entries),
+            completed=True,
+        )
         return
 
     # work through the query
@@ -93,6 +103,7 @@ def mirror(
     totals = collections.Counter()
     updater = mirror_store.Updater(paths.mirror)
     last_request_time = time.time()
+    completed = False   # reached the end of the query (vs interrupted/partial)
     try:
         for batch_number in (
             itertools.count(1) if num_batches is None
@@ -152,6 +163,7 @@ def mirror(
                 )
 
             if len(batch) < BATCH_SIZE:
+                completed = True
                 break
     except KeyboardInterrupt:
         print("\nexiting query early.")
@@ -172,8 +184,44 @@ def mirror(
             path=paths.index, watermark=watermark, entries=entries,
         )
         print(f"saved {len(entries)} entries; watermark {watermark}")
+        _record_harvest(
+            paths,
+            t_start=run_start,
+            counts=dict(totals),
+            watermark=watermark,
+            papers=len(entries),
+            completed=completed,
+        )
 
     print("done.")
+
+
+def _record_harvest(
+    paths,
+    *,
+    t_start: str,
+    counts: dict[str, int],
+    watermark,
+    papers: int,
+    completed: bool,
+) -> None:
+    """
+    Append one run's record to the harvest log (harvests.jsonl beside the
+    other data files): what the run applied ("counts", empty when there was
+    nothing new), the watermark it reached, the resulting mirror size
+    ("papers"), and whether it saw the query through to the end
+    ("completed" is False for interrupted and batch-limited runs). The
+    record's "t" stamp is the write time, i.e. when the run ended; "t_start"
+    is when it began. Written only after the index is saved, so the log
+    never describes state that didn't land on disk.
+    """
+    util.log_event(paths.harvests, {
+        "t_start": t_start,
+        "counts": counts,
+        "watermark": util.to_datestamp(watermark),
+        "papers": papers,
+        "completed": completed,
+    })
 
 
 def _apply(

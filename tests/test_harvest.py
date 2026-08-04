@@ -1,6 +1,7 @@
 """Network-free tests for the metadata-mirror harvest (`firehose mirror`)."""
 
 import datetime
+import json
 import types
 
 from lxml import etree
@@ -92,6 +93,8 @@ def _configure_mirror(monkeypatch, tmp_path, records, expect_identify):
 
         def ListRecords(self, **kwargs):
             assert kwargs["metadataPrefix"] == "arXivRaw"
+            if not records:
+                raise harvest_module.NoRecordsMatch
             return iter(records)
 
     monkeypatch.setattr(harvest_module, "Sickle", FakeSickle)
@@ -136,6 +139,37 @@ def test_mirror_end_to_end_then_resumes_from_watermark(tmp_path, monkeypatch):
     entries, watermark = index.load_index(str(data_dir / "index.txt"))
     assert set(entries) == {"2606.00001", "2606.00002"}
     assert watermark == datetime.date(2026, 6, 4)
+
+
+def test_mirror_records_each_run_in_the_harvest_log(tmp_path, monkeypatch):
+    config_path, data_dir = _configure_mirror(monkeypatch, tmp_path, [
+        _raw_record(
+            "2606.00001",
+            datestamp="2026-06-02",
+            submitted="Mon, 01 Jun 2026 10:00:00 GMT",
+        ),
+    ], expect_identify=True)
+    harvest_module.mirror(config_path=config_path)
+
+    # a second run finding nothing new still records that it ran
+    config_path, data_dir = _configure_mirror(
+        monkeypatch, tmp_path, [], expect_identify=False,
+    )
+    harvest_module.mirror(config_path=config_path)
+
+    first, second = [
+        json.loads(line)
+        for line in (data_dir / "harvests.jsonl").read_text().splitlines()
+    ]
+    assert first["counts"] == {"new": 1}
+    assert first["watermark"] == "2026-06-02"
+    assert first["papers"] == 1
+    assert first["completed"] is True
+    assert first["t_start"] <= first["t"]
+    assert second["counts"] == {}
+    assert second["watermark"] == "2026-06-02"
+    assert second["papers"] == 1
+    assert second["completed"] is True
 
 
 def test_mirror_survives_malformed_record(tmp_path, monkeypatch):

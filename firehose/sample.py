@@ -111,16 +111,22 @@ def sample(
         downloads=Downloads(download_dir),
         stopwatch=Stopwatch(),
     )
-    run_effects(sc, sc.start(), session)
-    while not sc.done:
-        # measure the terminal each frame so a mid-scan resize is respected;
-        # shutil (not os) falls back to 80x24 off a TTY instead of raising.
-        rows = shutil.get_terminal_size().lines
-        print(render_frame(sc, session.stopwatch.elapsed(), rows=rows))
-        command = KEY_TO_COMMAND.get(readchar.readkey())
-        if command is None:
-            continue
-        run_effects(sc, sc.feed(command), session)
+    try:
+        run_effects(sc, sc.start(), session)
+        while not sc.done:
+            # measure the terminal each frame so a mid-scan resize is
+            # respected; shutil (not os) falls back to 80x24 off a TTY
+            # instead of raising.
+            rows = shutil.get_terminal_size().lines
+            print(render_frame(sc, session.stopwatch.elapsed(), rows=rows))
+            command = KEY_TO_COMMAND.get(readchar.readkey())
+            if command is None:
+                continue
+            run_effects(sc, sc.feed(command), session)
+    finally:
+        # settle event delivery (in remote mode, recording is asynchronous)
+        # even when the scan loop dies mid-session
+        store.close()
     print("done!")
 
 
